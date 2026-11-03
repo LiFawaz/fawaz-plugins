@@ -142,16 +142,16 @@
     const files = valenced.discord.native.FileModule;
     const constants = files.getConstants();
     const root = value.storageDir === 'cache' ? constants.CacheDirPath : constants.DocumentsDirPath;
-    const expectedPath = String(root || ('Valenced/' + value.storageDir)).replace(/\\/+$/, '') + '/' + value.folder;
+    const expectedPath = String(root || ('Valenced/' + value.storageDir)).replace(/\/+$/, '') + '/' + value.folder;
     const location = typeof stored.lastSavedPath === 'string' && stored.lastSavedPath
       ? stored.lastSavedPath
       : expectedPath;
     const showSaveLocation = async () => {
       try {
         await valenced.externals.ReactNativeClipboard.Clipboard.setString(location);
-        alert('Save location copied.\\n\\n' + location + '\\n\\nThis is Valenced app storage. It may not be visible in the normal Android Files app.');
+        alert('Save location copied.\n\n' + location + '\n\nThis is Valenced app storage. It may not be visible in the normal Android Files app.');
       } catch (error) {
-        alert('Save location:\\n\\n' + location + '\\n\\nThis is Valenced app storage. It may not be visible in the normal Android Files app.\\n\\n' + asError(error));
+        alert('Save location:\n\n' + location + '\n\nThis is Valenced app storage. It may not be visible in the normal Android Files app.\n\n' + asError(error));
       }
     };
     return h(Design.Stack, { spacing: 20 },
@@ -220,7 +220,7 @@
                     const configured = settingsOf(jsonStorage.cache || DEFAULTS);
                     const path = await save(files, attachment, message.id, configured);
                     await jsonStorage.set({ lastSavedPath: path });
-                    alert('Voice message saved successfully.\n\n' + path + '\\n\\nOpen Configure and tap Show save location to copy this path.');
+                    alert('Voice message saved successfully.\n\n' + path + '\n\nOpen Configure and tap Show save location to copy this path.');
                   } catch (error) {
                     const detail = asError(error);
                     pluginApi.reportError('Voice message download failed: ' + detail);
