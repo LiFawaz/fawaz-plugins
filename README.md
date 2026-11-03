@@ -20,7 +20,7 @@ Then open the plugin browser and install the plugins you want.
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.1 | Saves voice-message audio to the app Documents folder |
+| Voice Message Downloader | 1.0.2 | Saves voice-message audio to the app Documents folder |
 
 Hidden Channels is intentionally excluded.
 
@@ -35,6 +35,6 @@ Voice Message Downloader source is under `plugins/voice-message-downloader`.
 
 ## Notes
 
-Reaction Logs 1.2.9 is the latest version published in its stable plugin repository. The newer 1.3.0 build we found is from a feature branch and is not advertised here as a stable release.
+Reaction Logs 1.2.9 is the latest stable version currently published by its source repository. Newer 1.3.0 builds found on feature branches are not advertised as stable releases.
 
-Voice Message Downloader 1.0.1 saves into Valenced's app Documents directory under `voice-messages/`, not the public Android Downloads folder. It replaces the earlier unreliable internal downloader lookup, but still needs to be tested on the target Android/Valenced build.
+Voice Message Downloader 1.0.2 fixes the plugin script wrapper: Valenced expects the script expression to return an object with a `default` property containing the plugin options object. The previous ZIP incorrectly contained TypeScript CommonJS output, which caused "Plugin options must be an object" during initialization. The script wrapper was tested with Valenced's loader contract; live Android downloading still needs device verification.

@@ -2,9 +2,9 @@
   "format": 1,
   "id": "com.lifawaz.voice-message-downloader",
   "name": "Voice Message Downloader",
-  "description": "Adds a Download Voice Message action and saves the audio into the Valenced app Documents folder.",
+  "description": "Adds a Download Voice Message action and saves audio into the Valenced app Documents folder.",
   "author": "Li Fawaz (https://github.com/LiFawaz)",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "icon": "DownloadIcon",
   "dependencies": {
     "valenced.api": { "version": ">=1 <2" },
