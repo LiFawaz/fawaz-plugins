@@ -59,7 +59,7 @@
       "versions": {
         "1.1.7": {
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.role-color-everywhere%401.1.7.zip",
-          "sha256": "6402b79fdbb9a3f25f7863021a0a8db0cfa30311d8ef441b643cd5815808dc74",
+          "sha256": "7c8664d83c79909719174b88da84c3db8bd26e0b08b4f54baf54980ca52af818",
           "size": 5268,
           "dependencies": {
             "valenced.api": {
