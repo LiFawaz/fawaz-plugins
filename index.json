@@ -1,0 +1,122 @@
+{
+  "format": 1,
+  "name": "Fawaz Plugins",
+  "description": "Valenced plugin repository by LiFawaz.",
+  "plugins": {
+    "com.lifawaz.vc-follow": {
+      "name": "VC Follow",
+      "description": "Follow a user between Discord voice channels. Includes Configure settings and /vcf and /unvcf commands.",
+      "author": "Li Fawaz (https://github.com/LiFawaz)",
+      "channels": {
+        "latest": "1.0.23"
+      },
+      "versions": {
+        "1.0.23": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/valenced-vc-follow/main/pool/com.lifawaz.vc-follow%401.0.23.zip",
+          "sha256": "08061c69c2e582bbc46e242bc0369a65ec4cd16447108e7a8bef2a444e508a3b",
+          "size": 5521,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    },
+    "com.lifawaz.fake-deaf": {
+      "name": "Fake-deaf",
+      "description": "Toggle fake mute and deafen voice-state flags while keeping local audio unchanged.",
+      "author": "LiFawaz (https://github.com/LiFawaz)",
+      "channels": {
+        "latest": "0.2.0"
+      },
+      "versions": {
+        "0.2.0": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.fake-deaf%400.2.0.zip",
+          "sha256": "edf5303c8dd76af50d911a7d01e10b38ac0145716947cec4ce4831b16710a433",
+          "size": 2609,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    },
+    "com.lifawaz.role-color-everywhere": {
+      "name": "Role Color Everywhere",
+      "description": "Apply Discord role colors to message mentions, typing indicator names and voice channel users.",
+      "author": "Li Fawaz",
+      "channels": {
+        "latest": "1.1.7"
+      },
+      "versions": {
+        "1.1.7": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/Role-Colors-Everywhere/gh-pages/pool/com.lifawaz.role-color-everywhere%401.1.7.zip",
+          "sha256": "d69cfdeebdea7b08e1563eba2e9beb070087ac232621eda1a75c895f4fd6e86c",
+          "size": 5268,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    },
+    "lifawaz.reaction-logs": {
+      "name": "Reaction Logs",
+      "description": "Keep removed reaction pills highlighted red locally until the same emoji is added again.",
+      "author": "Li Fawaz",
+      "channels": {
+        "latest": "1.2.9"
+      },
+      "versions": {
+        "1.2.9": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/reaction-logs/gh-pages/pool/lifawaz.reaction-logs%401.2.9.zip",
+          "sha256": "3185ddc04acfaace550ceb38811380dd269e9c1d7f1c7b4dc8234257947a7203",
+          "size": 28504,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.2"
+            }
+          }
+        }
+      }
+    },
+    "com.lifawaz.voice-message-downloader": {
+      "name": "Voice Message Downloader",
+      "description": "Save Discord voice-message audio files to the Valenced app Documents folder.",
+      "author": "Li Fawaz (https://github.com/LiFawaz)",
+      "channels": {
+        "latest": "1.0.1"
+      },
+      "versions": {
+        "1.0.1": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.1.zip",
+          "sha256": "e67f7998cb873850cc47c71a01ff7b6558c56b47b806bac349a471b3adb2889f",
+          "size": 2686,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    }
+  }
+}
