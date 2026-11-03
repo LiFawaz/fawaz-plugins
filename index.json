@@ -5,7 +5,7 @@
   "plugins": {
     "com.lifawaz.vc-follow": {
       "name": "VC Follow",
-      "description": "Follow a user between Discord voice channels. Includes Configure settings and /vcf and /unvcf commands.",
+      "description": "Follow a user between Discord voice channels with Configure settings and /vcf and /unvcf commands.",
       "author": "Li Fawaz (https://github.com/LiFawaz)",
       "channels": {
         "latest": "1.0.23"
@@ -58,8 +58,8 @@
       },
       "versions": {
         "1.1.7": {
-          "url": "https://raw.githubusercontent.com/LiFawaz/Role-Colors-Everywhere/gh-pages/pool/com.lifawaz.role-color-everywhere%401.1.7.zip",
-          "sha256": "d69cfdeebdea7b08e1563eba2e9beb070087ac232621eda1a75c895f4fd6e86c",
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.role-color-everywhere%401.1.7.zip",
+          "sha256": "6402b79fdbb9a3f25f7863021a0a8db0cfa30311d8ef441b643cd5815808dc74",
           "size": 5268,
           "dependencies": {
             "valenced.api": {
@@ -97,10 +97,10 @@
     },
     "com.lifawaz.voice-message-downloader": {
       "name": "Voice Message Downloader",
-      "description": "Downloads Discord voice-message audio from its CDN and saves it in the Valenced app Documents folder.",
+      "description": "Download Discord voice-message audio and choose Documents or Cache plus a custom folder inside Valenced app storage.",
       "author": "Li Fawaz (https://github.com/LiFawaz)",
       "channels": {
-        "latest": "1.0.3"
+        "latest": "1.0.4"
       },
       "versions": {
         "1.0.1": {
@@ -133,6 +133,19 @@
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.3.zip",
           "sha256": "efbdcfb6a4fc9372cf059ce38db1f2ad1303b720e962b61e999e65b68e1b1a3e",
           "size": 3261,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.4": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.4.zip",
+          "sha256": "e21e0b7bc4f22df2017b3c8ab2923232448c7d65e833f3de0ba347b79272981c",
+          "size": 4180,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"

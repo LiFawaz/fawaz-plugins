@@ -1,12 +1,12 @@
 # Fawaz Plugins
 
-A single Valenced plugin repository maintained by LiFawaz.
+A unified Valenced plugin repository maintained by LiFawaz.
 
 ## Install
 
 Add this repository URL once in Valenced:
 
-```
+```text
 https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/index.json
 ```
 
@@ -16,25 +16,24 @@ Then open the plugin browser and install the plugins you want.
 
 | Plugin | Version | What it does |
 | --- | --- | --- |
-| VC Follow | 1.0.23 | Follows a user between voice channels |
+| VC Follow | 1.0.23 | Follows a user between Discord voice channels |
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.3 | Downloads voice audio from Discord CDN and saves it to app Documents |
+| Voice Message Downloader | 1.0.4 | Downloads voice audio and lets you choose app Documents or Cache and a folder |
 
-Hidden Channels is intentionally excluded.
+**Hidden Channels is intentionally excluded.**
+
+## Voice Message Downloader storage
+
+Open its **Configure** section. Choose **Documents** for persistent app storage or **Cache** for temporary app storage, then choose a folder name. Nested folders are supported, for example `Audio/Discord`.
+
+Valenced's exposed file API supports only app Documents and Cache. The plugin cannot save directly to the public Android Downloads folder through the current API. The plugin source is plain JavaScript under `plugins/voice-message-downloader/js/index.js`.
 
 ## Source repositories
 
-- [VC Follow](https://github.com/LiFawaz/valenced-vc-follow)
-- [Fake-deaf](https://github.com/LiFawaz/valenced-fake-deaf)
-- [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere)
-- [Reaction Logs](https://github.com/LiFawaz/reaction-logs)
+[VC Follow](https://github.com/LiFawaz/valenced-vc-follow) · [Fake-deaf](https://github.com/LiFawaz/valenced-fake-deaf) · [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere) · [Reaction Logs](https://github.com/LiFawaz/reaction-logs)
 
-Voice Message Downloader source is under `plugins/voice-message-downloader/js/index.js`. It is plain JavaScript rather than TypeScript.
+## Repository checks
 
-## Notes
-
-Reaction Logs 1.2.9 is still the latest stable version published by its source repository. Newer 1.3.0 builds are from a feature branch and remain experimental until tested and promoted.
-
-Voice Message Downloader 1.0.3 removes the remote `FileModule.readAsset()` call and instead uses JavaScript `fetch()` for the Discord CDN request, followed by Valenced's `FileModule.writeFile()` for app Documents storage. It also reports network and filesystem errors separately. The code passes a mocked loader/download test; live Android behavior still requires device verification.
+GitHub Actions validates locally hosted package sizes, SHA-256 hashes, ZIP integrity, and manifest ID/version consistency. It also checks the index, JavaScript syntax, and the Voice Message Downloader's Configure UI and save flow.

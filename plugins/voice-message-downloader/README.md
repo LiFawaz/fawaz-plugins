@@ -2,12 +2,14 @@
 
 Adds **Download Voice Message** to the long-press action sheet for native Discord voice messages.
 
-Version 1.0.3 downloads the attachment with JavaScript `fetch()` and writes it through Valenced's `FileModule.writeFile('documents', path, data, 'base64')` API. It no longer calls `FileModule.readAsset()` for a remote CDN URL, which could fail on Android with `Resource id #0x0`.
+## Configure
 
-Files are saved under the Valenced app's Documents directory in `voice-messages/`. This is app storage, not the public Android Downloads folder.
+Open the plugin's Configure section. Choose **Documents** to keep files in the app's persistent documents storage or **Cache** for temporary storage. Enter a folder name such as `voice-messages` or a nested path such as `Audio/Discord`.
 
-The source is plain JavaScript (`js/index.js`), not TypeScript. The plugin script uses the Valenced `plugin()` lifecycle API and returns the `{ default: options }` object expected by the plugin loader.
+## Saving behaviour
 
-If Discord's CDN link has expired, the plugin displays the HTTP status. If writing to Documents fails, it reports that as a separate error.
+The plugin downloads the attachment from Discord's CDN with `fetch()`, converts the returned bytes to base64, and writes the file using Valenced's `FileModule.writeFile()` API. It does not use `FileModule.readAsset()` on a remote URL, which failed on some Android builds with `Resource id #0x0`.
 
-Live download verification still depends on testing this build on the target Android/Valenced version.
+Valenced exposes only app Documents and Cache through its current file API. This plugin cannot write directly to the public Android Downloads folder or invoke Android's folder picker. Files are saved under the folder selected in Configure, inside the selected app storage location.
+
+The source is plain JavaScript. A smoke test covers the plugin loader wrapper, Configure callbacks, voice-message menu injection, CDN fetch, byte conversion, and selected storage path. Live Android behavior still needs testing on the user's installed Valenced build.

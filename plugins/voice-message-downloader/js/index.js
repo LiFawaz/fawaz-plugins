@@ -1,178 +1,221 @@
 (() => {
   'use strict';
 
-  const IS_VOICE_MESSAGE = 1 << 13;
-  const DISCORD_ATTACHMENT_URL = /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/(?:attachments|ephemeral-attachments)\//i;
-  const SAVE_DIRECTORY = 'voice-messages';
-  const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
+  const DEFAULTS = Object.freeze({ storageDir: 'documents', folder: 'voice-messages' });
+  const VOICE_FLAG = 1 << 13;
+  const CDN_URL = /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/(?:attachments|ephemeral-attachments)\//i;
+  const MAX_BYTES = 50 * 1024 * 1024;
 
-  function errorText(error) {
-    if (error && typeof error.message === 'string') return error.message;
-    return String(error);
+  const asError = error => error && typeof error.message === 'string' ? error.message : String(error);
+  const storageDir = value => value === 'cache' ? 'cache' : 'documents';
+
+  function folderPath(value) {
+    const parts = String(value || DEFAULTS.folder)
+      .replace(/\\/g, '/')
+      .split('/')
+      .map(part => part.trim())
+      .filter(part => part && part !== '.' && part !== '..')
+      .map(part => part.replace(/[^a-zA-Z0-9 _.-]/g, '_').slice(0, 48))
+      .filter(part => part && !/^\.+$/.test(part))
+      .slice(0, 6);
+    return parts.length ? parts.join('/') : DEFAULTS.folder;
   }
 
-  function getVoiceAttachment(message) {
-    if (!message || typeof message.flags !== 'number') return undefined;
-    if ((message.flags & IS_VOICE_MESSAGE) === 0) return undefined;
-    if (!Array.isArray(message.attachments) || message.attachments.length !== 1) return undefined;
+  function settingsOf(value) {
+    return {
+      storageDir: storageDir(value && value.storageDir),
+      folder: folderPath(value && value.folder)
+    };
+  }
+
+  function voiceAttachment(message) {
+    if (!message || typeof message.flags !== 'number' || !(message.flags & VOICE_FLAG)) return null;
+    if (!Array.isArray(message.attachments) || message.attachments.length !== 1) return null;
     const attachment = message.attachments[0];
-    if (!attachment || typeof attachment.content_type !== 'string') return undefined;
-    if (!attachment.content_type.toLowerCase().startsWith('audio/')) return undefined;
+    if (!attachment || typeof attachment.content_type !== 'string') return null;
+    if (!attachment.content_type.toLowerCase().startsWith('audio/')) return null;
     const url = attachment.url || attachment.proxy_url;
-    if (typeof url !== 'string' || !DISCORD_ATTACHMENT_URL.test(url)) return undefined;
-    return attachment;
+    return typeof url === 'string' && CDN_URL.test(url) ? attachment : null;
   }
 
-  function getMessageFromProps(props) {
-    const candidate = props?.message
-      ?? props?.messageRecord?.message
-      ?? props?.record?.message
-      ?? props?.item?.message;
-    if (candidate?.message && typeof candidate.flags !== 'number') return candidate.message;
-    return candidate;
+  function messageFrom(props) {
+    const candidate = props && (props.message || (props.messageRecord && props.messageRecord.message) ||
+      (props.record && props.record.message) || (props.item && props.item.message));
+    return candidate && candidate.message && typeof candidate.flags !== 'number' ? candidate.message : candidate;
   }
 
-  function findActionSheet(element, ActionSheet, seen = new Set()) {
-    if (!element || typeof element !== 'object' || seen.has(element)) return undefined;
-    seen.add(element);
-    if (Array.isArray(element)) {
-      for (const child of element) {
-        const found = findActionSheet(child, ActionSheet, seen);
+  function findSheet(node, ActionSheet, seen) {
+    if (!node || typeof node !== 'object' || seen.has(node)) return null;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = findSheet(child, ActionSheet, seen);
         if (found) return found;
       }
-      return undefined;
+      return null;
     }
-    const node = element;
-    if (node.type === ActionSheet || node.type?.displayName === 'ActionSheet' || node.type?.name === 'ActionSheet') return node;
-    return findActionSheet(node.props?.children, ActionSheet, seen);
+    if (node.type === ActionSheet || node.type && (node.type.displayName === 'ActionSheet' || node.type.name === 'ActionSheet')) return node;
+    return findSheet(node.props && node.props.children, ActionSheet, seen);
   }
 
-  function addToActionSheet(tree, group, ActionSheet) {
-    const sheet = findActionSheet(tree, ActionSheet);
+  function insertAction(tree, group, ActionSheet) {
+    const sheet = findSheet(tree, ActionSheet, new Set());
     if (!sheet) return false;
-    const children = [sheet.props?.children].flat().filter(Boolean);
+    const children = [sheet.props && sheet.props.children].flat().filter(Boolean);
     children.push(group);
-    sheet.props = { ...sheet.props, children };
+    sheet.props = Object.assign({}, sheet.props, { children });
     return true;
   }
 
-  function getFileName(attachment, messageId) {
-    const raw = typeof attachment.filename === 'string' ? attachment.filename : '';
-    let name = raw.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
-    if (!name) name = \`voice-message-\${messageId || Date.now()}.ogg\`;
+  function filenameFor(attachment, messageId) {
+    let name = String(attachment.filename || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+    if (!name) name = 'voice-message.ogg';
     if (!/\.[a-z0-9]{2,8}$/i.test(name)) name += '.ogg';
     const dot = name.lastIndexOf('.');
     const stem = dot > 0 ? name.slice(0, dot) : name;
-    const extension = dot > 0 ? name.slice(dot) : '.ogg';
+    const ext = dot > 0 ? name.slice(dot) : '.ogg';
     const suffix = messageId ? String(messageId).replace(/[^a-zA-Z0-9_-]/g, '').slice(-10) : 'audio';
-    return \`\${stem}-\${suffix || 'audio'}-\${Date.now()}\${extension}\`;
+    return stem + '-' + (suffix || 'audio') + '-' + Date.now() + ext;
   }
 
-  async function fetchAudioAsBase64(url, attachment) {
+  function toBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let output = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const a = bytes[i];
+      const hasB = i + 1 < bytes.length;
+      const hasC = i + 2 < bytes.length;
+      const b = hasB ? bytes[i + 1] : 0;
+      const c = hasC ? bytes[i + 2] : 0;
+      output += alphabet[a >> 2];
+      output += alphabet[((a & 3) << 4) | (b >> 4)];
+      output += hasB ? alphabet[((b & 15) << 2) | (c >> 6)] : '=';
+      output += hasC ? alphabet[c & 63] : '=';
+    }
+    return output;
+  }
+
+  async function downloadBase64(url, attachment) {
     let response;
     try {
       response = await fetch(url, { method: 'GET' });
     } catch (error) {
-      throw new Error(\`Could not contact Discord's attachment server: \${errorText(error)}\`);
+      throw new Error("Could not contact Discord's attachment server: " + asError(error));
     }
     if (!response || !response.ok) {
-      const status = response ? \`\${response.status} \${response.statusText || ''}\`.trim() : 'no response';
-      throw new Error(\`Discord's attachment server returned \${status}. The voice message link may have expired.\`);
+      const status = response ? String(response.status) + ' ' + (response.statusText || '') : 'no response';
+      throw new Error("Discord's attachment server returned " + status.trim() + '. The link may have expired.');
     }
-    const contentType = String(response.headers?.get?.('content-type') || attachment.content_type || '').toLowerCase();
-    if (contentType && !contentType.startsWith('audio/') && !contentType.includes('application/octet-stream')) {
-      throw new Error(\`The attachment server returned an unexpected content type: \${contentType}\`);
+    const type = String(response.headers && response.headers.get && response.headers.get('content-type') || attachment.content_type || '').toLowerCase();
+    if (type && !type.startsWith('audio/') && !type.includes('application/octet-stream')) {
+      throw new Error('Unexpected attachment content type: ' + type);
     }
     const buffer = await response.arrayBuffer();
-    if (!buffer || buffer.byteLength === 0) throw new Error('Discord returned an empty audio file.');
-    if (buffer.byteLength > MAX_AUDIO_BYTES) {
-      throw new Error(\`The audio file is larger than the \${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)} MB safety limit.\`);
-    }
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-    }
-    if (typeof btoa !== 'function') throw new Error('This Valenced build does not expose the base64 encoder required to save audio.');
-    return btoa(binary);
+    if (!buffer || !buffer.byteLength) throw new Error('Discord returned an empty audio file.');
+    if (buffer.byteLength > MAX_BYTES) throw new Error('Audio file exceeds the 50 MB safety limit.');
+    return toBase64(buffer);
   }
 
-  async function saveVoiceMessage(files, attachment, messageId) {
+  async function save(files, attachment, messageId, configured) {
     const url = attachment.url || attachment.proxy_url;
-    if (!url || !DISCORD_ATTACHMENT_URL.test(url)) {
-      throw new Error('The voice attachment URL is missing or unsupported.');
-    }
-    // Remote CDN downloads use fetch(). readAsset() can be resolved as an Android
-    // packaged resource on some builds and fail with Resource id #0x0.
-    const base64 = await fetchAudioAsBase64(url, attachment);
-    const fileName = getFileName(attachment, messageId);
-    const relativePath = \`\${SAVE_DIRECTORY}/\${fileName}\`;
-    let savedPath;
+    if (!url || !CDN_URL.test(url)) throw new Error('The voice attachment URL is missing or unsupported.');
+    const base64 = await downloadBase64(url, attachment);
+    const config = settingsOf(configured);
+    if (!files || typeof files.writeFile !== 'function') throw new Error('Valenced FileModule.writeFile is unavailable.');
+    const relativePath = config.folder + '/' + filenameFor(attachment, messageId);
+    let result;
     try {
-      if (!files || typeof files.writeFile !== 'function') {
-        throw new Error('Valenced FileModule.writeFile is unavailable in this build.');
-      }
-      savedPath = await files.writeFile('documents', relativePath, base64, 'base64');
+      result = await files.writeFile(config.storageDir, relativePath, base64, 'base64');
     } catch (error) {
-      throw new Error(\`Audio downloaded, but Android could not write it to Documents: \${errorText(error)}\`);
+      throw new Error('Audio downloaded, but Android could not write to ' + config.storageDir + ': ' + asError(error));
     }
-    if (typeof savedPath !== 'string' || !savedPath) {
-      throw new Error('Android did not return a saved file path after writing the audio.');
-    }
-    return savedPath;
+    if (typeof result !== 'string' || !result) throw new Error('Android did not return the saved file path.');
+    return result;
+  }
+
+  function SettingsComponent({ api }) {
+    const value = settingsOf(Object.assign({}, DEFAULTS, api.jsonStorage.use() || {}));
+    const Design = valenced.discord.design.Design;
+    const h = valenced.react.React.createElement;
+    return h(Design.Stack, { spacing: 20 },
+      h(Design.TableRadioGroup, {
+        title: 'Save location',
+        value: value.storageDir,
+        onChange: next => api.jsonStorage.set({ storageDir: storageDir(next) })
+      },
+        h(Design.TableRadioRow, { label: 'Documents', subLabel: 'Persistent storage inside Valenced.', value: 'documents' }),
+        h(Design.TableRadioRow, { label: 'Cache', subLabel: 'Temporary storage that may be cleared.', value: 'cache' })
+      ),
+      h(Design.TableRowGroup, { title: 'Folder name' },
+        h(Design.TextInput, {
+          label: 'Folder inside the selected location',
+          value: value.folder,
+          maxLength: 120,
+          placeholder: 'voice-messages',
+          description: 'Nested folders are supported, for example Audio/Discord.',
+          onChange: folder => api.jsonStorage.set({ folder })
+        })
+      ),
+      h(Design.Text, { variant: 'text-sm/normal' },
+        'This saves inside Valenced app storage. The current Valenced file API does not expose the public Android Downloads folder or Android folder picker.'
+      )
+    );
   }
 
   const options = plugin({
-    start({ cleanup, plugin: pluginApi, unscoped }) {
-      const { getModules } = unscoped.modules.finders;
-      const { withName } = unscoped.modules.finders.filters;
-      const { instead } = unscoped.patcher;
-      const { ActionSheetActionCreators } = unscoped.discord.actions;
-      const { ActionSheet, ActionSheetRow } = unscoped.discord.design.Design;
+    jsonStorage: { load: true, default: DEFAULTS },
+    start({ cleanup, plugin: pluginApi, jsonStorage, unscoped }) {
+      const getModules = unscoped.modules.finders.getModules;
+      const withName = unscoped.modules.finders.filters.withName;
+      const instead = unscoped.patcher.instead;
+      const actionCreators = unscoped.discord.actions.ActionSheetActionCreators;
+      const Design = unscoped.discord.design.Design;
+      const ActionSheet = Design.ActionSheet;
+      const ActionSheetRow = Design.ActionSheetRow;
       const files = unscoped.discord.native.FileModule;
-      const { lookupGeneratedIconComponent } = unscoped.utils.discord;
-      const { createElement } = unscoped.react.React;
+      const icon = unscoped.utils.discord.lookupGeneratedIconComponent;
+      const h = unscoped.react.React.createElement;
 
-      cleanup(getModules(withName('LongPressMessageActionSheet'), mod => {
-        if (typeof mod?.default !== 'function') return;
-        cleanup(instead(mod, 'default', (args, Original) => {
-          const tree = Reflect.apply(Original, undefined, args);
+      cleanup(getModules(withName('LongPressMessageActionSheet'), module => {
+        if (!module || typeof module.default !== 'function') return;
+        cleanup(instead(module, 'default', (args, original) => {
+          const tree = Reflect.apply(original, undefined, args);
           try {
-            const message = getMessageFromProps(args?.[0]);
-            const attachment = getVoiceAttachment(message);
+            const message = messageFrom(args && args[0]);
+            const attachment = voiceAttachment(message);
             if (!attachment) return tree;
-            const filename = getFileName(attachment, message?.id);
-            const group = createElement(
-              ActionSheetRow.Group,
-              null,
-              createElement(ActionSheetRow, {
+
+            const name = filenameFor(attachment, message.id);
+            const group = h(ActionSheetRow.Group, null,
+              h(ActionSheetRow, {
                 label: 'Download Voice Message',
-                icon: createElement(ActionSheetRow.Icon, {
-                  IconComponent: lookupGeneratedIconComponent('DownloadIcon'),
-                }),
+                icon: h(ActionSheetRow.Icon, { IconComponent: icon('DownloadIcon') }),
                 onPress: async () => {
                   try {
-                    ActionSheetActionCreators.hideActionSheet();
-                    const savedPath = await saveVoiceMessage(files, attachment, message?.id);
-                    alert(\`Voice message saved successfully.\\n\\n\${savedPath}\`);
+                    actionCreators.hideActionSheet();
+                    const configured = settingsOf(jsonStorage.cache || DEFAULTS);
+                    const path = await save(files, attachment, message.id, configured);
+                    alert('Voice message saved successfully.\\n\\n' + path);
                   } catch (error) {
-                    const detail = errorText(error);
-                    pluginApi.reportError(\`Voice message download failed: \${detail}\`);
-                    alert(\`Could not save \${filename}.\\n\\n\${detail}\\n\\nCheck Valenced Debug Logs for details.\`);
+                    const detail = asError(error);
+                    pluginApi.reportError('Voice message download failed: ' + detail);
+                    alert('Could not save ' + name + '.\\n\\n' + detail + '\\n\\nCheck Valenced Debug Logs for details.');
                   }
-                },
-              }),
+                }
+              })
             );
-            if (!addToActionSheet(tree, group, ActionSheet)) {
+            if (!insertAction(tree, group, ActionSheet)) {
               pluginApi.reportError('Voice message was detected, but the long-press action sheet could not be located.');
             }
           } catch (error) {
-            pluginApi.reportError(\`Could not add voice message download action: \${errorText(error)}\`);
+            pluginApi.reportError('Could not add voice message download action: ' + asError(error));
           }
           return tree;
         }));
       }, { returnNamespace: true }));
     },
+    SettingsComponent
   });
 
   return { default: options };
