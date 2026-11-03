@@ -20,7 +20,7 @@ Then open the plugin browser and install the plugins you want.
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.2 | Saves voice-message audio to the app Documents folder |
+| Voice Message Downloader | 1.0.3 | Downloads voice audio from Discord CDN and saves it to app Documents |
 
 Hidden Channels is intentionally excluded.
 
@@ -31,10 +31,10 @@ Hidden Channels is intentionally excluded.
 - [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere)
 - [Reaction Logs](https://github.com/LiFawaz/reaction-logs)
 
-Voice Message Downloader source is under `plugins/voice-message-downloader`.
+Voice Message Downloader source is under `plugins/voice-message-downloader/js/index.js`. It is plain JavaScript rather than TypeScript.
 
 ## Notes
 
-Reaction Logs 1.2.9 is the latest stable version currently published by its source repository. Newer 1.3.0 builds found on feature branches are not advertised as stable releases.
+Reaction Logs 1.2.9 is still the latest stable version published by its source repository. Newer 1.3.0 builds are from a feature branch and remain experimental until tested and promoted.
 
-Voice Message Downloader 1.0.2 fixes the plugin script wrapper: Valenced expects the script expression to return an object with a `default` property containing the plugin options object. The previous ZIP incorrectly contained TypeScript CommonJS output, which caused "Plugin options must be an object" during initialization. The script wrapper was tested with Valenced's loader contract; live Android downloading still needs device verification.
+Voice Message Downloader 1.0.3 removes the remote `FileModule.readAsset()` call and instead uses JavaScript `fetch()` for the Discord CDN request, followed by Valenced's `FileModule.writeFile()` for app Documents storage. It also reports network and filesystem errors separately. The code passes a mocked loader/download test; live Android behavior still requires device verification.

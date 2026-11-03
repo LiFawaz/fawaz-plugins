@@ -2,8 +2,12 @@
 
 Adds **Download Voice Message** to the long-press action sheet for native Discord voice messages.
 
-The plugin checks Discord's `IS_VOICE_MESSAGE` flag, validates the audio attachment, reads the attachment as base64 through Valenced's native file API, and writes it under the Valenced app Documents directory in `voice-messages/`.
+Version 1.0.3 downloads the attachment with JavaScript `fetch()` and writes it through Valenced's `FileModule.writeFile('documents', path, data, 'base64')` API. It no longer calls `FileModule.readAsset()` for a remote CDN URL, which could fail on Android with `Resource id #0x0`.
 
-This version no longer relies on Discord's internal `downloadMediaAsset` lookup. The save location is app Documents, not the public Android Downloads folder. After a successful write, the plugin displays the saved path.
+Files are saved under the Valenced app's Documents directory in `voice-messages/`. This is app storage, not the public Android Downloads folder.
 
-The integration still depends on Discord's `LongPressMessageActionSheet` component. It must be tested on the target Valenced/Discord build before being described as live-device verified.
+The source is plain JavaScript (`js/index.js`), not TypeScript. The plugin script uses the Valenced `plugin()` lifecycle API and returns the `{ default: options }` object expected by the plugin loader.
+
+If Discord's CDN link has expired, the plugin displays the HTTP status. If writing to Documents fails, it reports that as a separate error.
+
+Live download verification still depends on testing this build on the target Android/Valenced version.

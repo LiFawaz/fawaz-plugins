@@ -97,10 +97,10 @@
     },
     "com.lifawaz.voice-message-downloader": {
       "name": "Voice Message Downloader",
-      "description": "Save Discord voice-message audio to the Valenced app Documents folder.",
+      "description": "Downloads Discord voice-message audio from its CDN and saves it in the Valenced app Documents folder.",
       "author": "Li Fawaz (https://github.com/LiFawaz)",
       "channels": {
-        "latest": "1.0.2"
+        "latest": "1.0.3"
       },
       "versions": {
         "1.0.1": {
@@ -120,6 +120,19 @@
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.2.zip",
           "sha256": "92044517d0771aa9a4f32ef8c9e480f78ce720dc86970456b610ae720384dc34",
           "size": 2565,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.3": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.3.zip",
+          "sha256": "efbdcfb6a4fc9372cf059ce38db1f2ad1303b720e962b61e999e65b68e1b1a3e",
+          "size": 3261,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
