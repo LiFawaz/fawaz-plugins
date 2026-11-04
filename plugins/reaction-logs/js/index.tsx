@@ -180,9 +180,10 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
                 },
             ),
 
-            () => {
-                // This clears only native in-memory view bindings. Persistent
-                // JSON history remains untouched and is restored on the next start.
+            async () => {
+                // Drain all queued JSON writes before native teardown. This cleanup
+                // clears only native in-memory view bindings, never saved history.
+                await persistQueue
                 try {
                     clearRemoved()
                 } catch (error) {
