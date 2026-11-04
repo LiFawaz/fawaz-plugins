@@ -40,6 +40,7 @@ private const val MG_RECYCLER_VIEW_HOLDER =
 
 private val REMOVED_RED = Color.rgb(237, 66, 69)
 private val REMOVED_TINT = Color.argb(48, 237, 66, 69)
+private const val STALE_ACTIVE_ROW_GRACE_MS = 5_000L
 
 internal class ReactionLogHooks(
     dexFinder: DexFinder,
@@ -581,11 +582,17 @@ internal class ReactionLogHooks(
         var unresolvedUsers = false
         for (entry in historyForSelection) {
             if (entry.userId in currentActiveIds) continue
-            // Keep and mark an existing real Discord row when available. This also
-            // covers a temporarily unresolved StoreUser cache entry without dropping
-            // the profile already present in the current popup model.
+            // Discord can dispatch the removal before its popup model refreshes.
+            // Briefly mark that stale row red, then re-check the model. For older
+            // history, a user already present in Discord's active list is authoritative
+            // evidence that the reaction is active again (including while the plugin
+            // was unloaded and could not observe the ADD event).
             if (entry.userId in existingUsers) {
-                removedIds.add(entry.userId)
+                val age = entry.timestamp?.let { System.currentTimeMillis() - it } ?: Long.MAX_VALUE
+                if (age in 0..STALE_ACTIVE_ROW_GRACE_MS) {
+                    removedIds.add(entry.userId)
+                    unresolvedUsers = true
+                }
                 continue
             }
             val user = resolveUser(loader, entry.userId)
