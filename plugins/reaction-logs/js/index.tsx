@@ -6,7 +6,7 @@ import {
     getReactionLogFluxEvent,
     reduceReactionLogFluxPayload,
 } from './flux-events'
-import type { FluxEventName, FluxReactionPayload } from './flux-events'
+import type { FluxReactionPayload } from './flux-events'
 import {
     buildNativeSnapshot,
     normalizeReactionStorage,
