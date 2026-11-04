@@ -18,7 +18,13 @@ const base = (overrides: Partial<ReactionPayload> = {}): ReactionPayload => ({
     message_id: 'message-1',
     guild_id: 'guild-1',
     user_id: 'user-1',
-    emoji: { name: 'heart', id: null },
+    emoji: {
+        name: 'heart',
+        id: null,
+        src: 'https://cdn.example.invalid/heart',
+        displayName: 'heart',
+        animated: false,
+    },
     reaction_type: 0,
     ...overrides,
 })
@@ -42,6 +48,21 @@ describe('Reaction Logs event state', () => {
         expect(buildNativeSnapshot(reloaded, 300).activeRemovals).toEqual(
             buildNativeSnapshot(current, 300).activeRemovals,
         )
+    })
+
+    test('REMOVE records a user even when no ADD was observed in this session', () => {
+        const current = applyReactionRemove(state(), base(), 200)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.removalHistory[0]).toMatchObject({
+            channelId: 'channel-1',
+            messageId: 'message-1',
+            userId: 'user-1',
+            emojiKey: 'unicode:heart',
+            timestamp: 200,
+        })
+        expect(buildNativeSnapshot(current, 200).activeRemovals).toEqual([
+            { pillKey: 'message-1|unicode:heart|0', removedUsers: [{ id: 'user-1' }] },
+        ])
     })
 
     test('one add then one remove records the affected user', () => {
@@ -126,6 +147,21 @@ describe('Reaction Logs event state', () => {
         expect(current.removalHistory).toHaveLength(1)
     })
 
+    test('a later removal after an unobserved re-add is not deduplicated forever', () => {
+        let current = applyReactionRemove(state(), base(), 100)
+        current = applyReactionRemove(current, base(), 101)
+        expect(current.removalHistory).toHaveLength(1)
+
+        // The plugin may have been stopped during the re-add, so no ADD event
+        // arrived to advance the epoch. The later REMOVE must still be recorded.
+        current = applyReactionRemove(current, base(), 6_000)
+        expect(current.removalHistory).toHaveLength(2)
+
+        current = applyReactionAdd(current, base(), 7_000)
+        current = applyReactionRemove(current, base(), 7_001)
+        expect(current.removalHistory).toHaveLength(3)
+    })
+
     test('a new user add does not clear another user removal history', () => {
         let current = applyReactionAdd(state(), base({ user_id: 'user-a' }), 1)
         current = applyReactionRemove(current, base({ user_id: 'user-a' }), 2)
@@ -140,6 +176,61 @@ describe('Reaction Logs event state', () => {
         current = applyReactionRemove(current, base({ reaction_type: 1 }), 3)
         expect(current.activeReactions.map(row => row.reactionType)).toEqual([0])
         expect(current.removalHistory[0].reactionType).toBe(1)
+    })
+
+    test('Flux camelCase IDs and numeric IDs normalize to strings', () => {
+        const current = applyReactionRemove(state(), {
+            channelId: 1001,
+            messageId: 2002,
+            userId: 3003,
+            guildId: 4004,
+            emoji: {
+                id: 5005,
+                name: null,
+                src: 'https://cdn.example.invalid/5005',
+                displayName: 'custom-emote',
+                animated: true,
+            },
+            reactionType: '1',
+        }, 1234)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.removalHistory[0]).toMatchObject({
+            channelId: '1001',
+            messageId: '2002',
+            userId: '3003',
+            guildId: '4004',
+            emojiId: '5005',
+            emojiName: null,
+            emojiSrc: 'https://cdn.example.invalid/5005',
+            emojiDisplayName: 'custom-emote',
+            emojiAnimated: true,
+            emojiKey: 'custom:5005',
+            reactionType: 1,
+        })
+    })
+
+    test('full emoji rendering metadata survives JSON reload for native reconstruction', () => {
+        let current = applyReactionRemove(state(), base({
+            emoji: {
+                id: '987654321',
+                name: 'party',
+                src: 'https://cdn.example.invalid/987654321.gif',
+                displayName: 'party',
+                animated: true,
+            },
+        }), 100)
+        current = normalizeReactionStorage(JSON.parse(JSON.stringify(current)), 200)
+        const native = buildNativeSnapshot(current, 200)
+        expect(native.removalHistory[0]).toMatchObject({
+            emojiId: '987654321',
+            emojiName: 'party',
+            emojiSrc: 'https://cdn.example.invalid/987654321.gif',
+            emojiDisplayName: 'party',
+            emojiAnimated: true,
+        })
+        expect(native.activeRemovals).toEqual([
+            { pillKey: 'message-1|custom:987654321|0', removedUsers: [{ id: 'user-1' }] },
+        ])
     })
 
     test('custom emoji identity uses stable ID even if name is absent', () => {
@@ -250,6 +341,9 @@ describe('Reaction Logs event state', () => {
                 userId: `active-user-${index}`,
                 emojiId: null,
                 emojiName: 'heart',
+                emojiSrc: null,
+                emojiDisplayName: 'heart',
+                emojiAnimated: false,
                 emojiKey: 'unicode:heart',
                 reactionType: 0,
             }),
