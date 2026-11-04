@@ -863,8 +863,8 @@ internal class ReactionLogHooks(
 
         for (active in activeForSelection) {
             if (!existingUsers.add(active.userId)) continue
-            val user = resolveUser(loader, active.userId) ?: continue
             val member = guildId?.let { resolveGuildMember(loader, it, active.userId) }
+            val user = resolveUser(loader, active.userId) ?: readMember(member, "user") ?: continue
             createReactionUserItem(loader, user, channelLong, messageLong, emoji, member)?.let {
                 output.add(it)
             }
@@ -880,17 +880,23 @@ internal class ReactionLogHooks(
             // evidence that the reaction is active again (including while the plugin
             // was unloaded and could not observe the ADD event).
             if (entry.userId in existingUsers) {
-                // The original Discord userItems list is authoritative. If the
-                // user is still returned by Discord, do not re-add or paint an
-                // old history record red after they have reacted again.
+                // A just-dispatched REMOVE can arrive before Discord refreshes the
+                // currently open popup's userItems. Keep that stale row red briefly;
+                // after the grace period the live Discord list is authoritative,
+                // which also prevents old history from painting a later re-ADD red.
+                val removedAt = entry.timestamp ?: 0L
+                val recentRemoval = removedAt > 0L &&
+                    System.currentTimeMillis() >= removedAt &&
+                    System.currentTimeMillis() - removedAt <= 5_000L
+                if (recentRemoval) removedIds.add(entry.userId)
                 continue
             }
-            val user = resolveUser(loader, entry.userId)
+            val member = guildId?.let { resolveGuildMember(loader, it, entry.userId) }
+            val user = resolveUser(loader, entry.userId) ?: readMember(member, "user")
             if (user == null) {
                 unresolvedUsers = true
                 continue
             }
-            val member = guildId?.let { resolveGuildMember(loader, it, entry.userId) }
             val row = createReactionUserItem(loader, user, channelLong, messageLong, emoji, member)
             if (row == null) {
                 unresolvedUsers = true
