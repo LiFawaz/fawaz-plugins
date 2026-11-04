@@ -899,12 +899,60 @@ internal class ReactionLogHooks(
         configurePopupMethod = configureUi
 
         unhooks += configureUi.hook(before = { param ->
-            val model = param.args.getOrNull(0) ?: return@hook
             val widget = param.thisObject
             lastPopupWidget = WeakReference(widget)
+            val argumentTarget = readWidgetTargetEmoji(widget)
+            if (popupTargetApiKey == null && argumentTarget != null) {
+                popupTargetApiKey = argumentTarget
+            }
+
+            val incoming = param.args.getOrNull(0)
+            val model = incoming ?: buildFallbackManageReactionsModel(
+                widget,
+                popupTargetApiKey ?: argumentTarget,
+                dexFinder.classLoader,
+            ) ?: return@hook
+
+            // Cache the raw model (not the augmented copy) so popup refreshes and
+            // retries can safely rebuild userItems without duplicating rows.
             lastPopupModel = model
-            val augmented = augmentReactionPopup(widget, model, dexFinder.classLoader)
+            val augmented = augmentReactionPopup(
+                widget,
+                model,
+                dexFinder.classLoader,
+                popupTargetApiKey ?: argumentTarget,
+            )
             if (augmented !== model) param.args[0] = augmented
+        })
+
+        // The stock model provider emits null and closes WidgetManageReactions
+        // after its last active reaction disappears. Its emoji selector still
+        // calls this method, but no stream update follows when currentReactions
+        // is empty, so update the same original widget ourselves for that tab.
+        val providerClass = dexFinder.classLoader.loadClass(MANAGE_REACTIONS_MODEL_PROVIDER)
+        val onEmojiTargeted = providerClass.declaredMethods.firstOrNull {
+            it.name == "onEmojiTargeted" &&
+                it.parameterCount == 1 &&
+                it.parameterTypes[0] == String::class.java
+        } ?: error("ManageReactionsModelProvider.onEmojiTargeted(String) not found")
+        onEmojiTargeted.isAccessible = true
+        unhooks += onEmojiTargeted.hook(after = { param ->
+            val widget = lastPopupWidget?.get() ?: return@hook
+            if (readMember(widget, "modelProvider") !== param.thisObject) return@hook
+            val target = param.args.getOrNull(0) as? String ?: return@hook
+            popupTargetApiKey = target
+
+            if (hasPositiveReactionTab(lastPopupModel, target)) return@hook
+            if (!hasRemovalForTarget(widget, target, dexFinder.classLoader)) return@hook
+
+            val fallback = buildFallbackManageReactionsModel(widget, target, dexFinder.classLoader)
+                ?: return@hook
+            lastPopupModel = fallback
+            runCatching {
+                configureUi.invoke(widget, fallback)
+            }.onFailure {
+                XposedBridge.log("Reaction Logs: could not switch to zero-count popup tab: $it")
+            }
         })
 
         // Stop retries and release popup references as soon as Discord destroys
