@@ -118,7 +118,7 @@ describe('Reaction Logs exact reaction history', () => {
         expect(removedUsersForPopup(state, popup(), ['user-b'])).toEqual(['user-a'])
     })
 
-    test('re-adding the same user's reaction makes the current row normal but preserves history', () => {
+    test('re-adding the same user reaction makes the current row normal but preserves history', () => {
         let state = applyReactionAdd(fresh(), base(), 1_000_001)
         state = applyReactionRemove(state, base(), 1_000_002)
         state = applyReactionAdd(state, base(), 1_000_003)
