@@ -54,6 +54,8 @@ export interface ReactionRuntimeState {
     storage: ReactionStorage
     /** Session-only view of active reactions received while this plugin is loaded. */
     activeReactions: ActiveReaction[]
+    /** Used to distinguish newly received removals from stale history after an app restart. */
+    sessionStartedAt: number
 }
 
 export interface PopupReactionContext {
