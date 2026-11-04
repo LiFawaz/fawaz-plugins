@@ -89,6 +89,24 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
                 },
             ),
 
+            // Discord can populate or refresh the cached profile after the removal
+            // event. Re-run the open popup model patch when that happens.
+            onFluxEventDispatched<ReactionPayload>(
+                'USER_UPDATE',
+                payload => {
+                    if (state.removalHistory.length > 0) syncNative()
+                    return payload
+                },
+            ),
+
+            onFluxEventDispatched<ReactionPayload>(
+                'GUILD_MEMBER_UPDATE',
+                payload => {
+                    if (state.removalHistory.length > 0) syncNative()
+                    return payload
+                },
+            ),
+
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_DELETE_BULK',
                 payload => {
