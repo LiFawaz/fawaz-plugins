@@ -846,9 +846,16 @@ internal class ReactionLogHooks(
             popupRetryKey = selectionRetryKey
         }
 
+        // activeRemovals is computed by TypeScript from the current epoch and
+        // active-reaction state. Use it as the authority for current red popup rows;
+        // removalHistory also contains older records superseded by a later ADD.
+        val currentRemovedIds = synchronized(removedUsersByKey) {
+            removedUsersByKey[reactionKey(messageId, selectedEmojiKey, selectedReactionType)].orEmpty().toSet()
+        }
         val historyForSelection = synchronized(removalHistory) {
             removalHistory.values.filter { entry ->
-                entry.messageId == messageId &&
+                entry.userId in currentRemovedIds &&
+                    entry.messageId == messageId &&
                     (entry.channelId.isBlank() || entry.channelId == channelId) &&
                     entry.emojiKey == selectedEmojiKey &&
                     entry.reactionType == selectedReactionType &&
