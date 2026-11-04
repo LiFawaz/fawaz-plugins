@@ -10,4 +10,4 @@ Build from the repository root with:
 gradle --no-daemon packageReactionLogs
 ```
 
-The installable package is generated at `build/dist/lifawaz.reaction-logs@1.4.1.zip`.
+The installable package is generated at `build/dist/lifawaz.reaction-logs@1.4.3.zip`.
