@@ -103,3 +103,20 @@ export function applyReactionLogFluxEvent(
             return current
     }
 }
+
+/**
+ * The production listener and tests share this single raw-payload entry point.
+ * A null result means this Flux action is not owned by Reaction Logs.
+ */
+export function reduceReactionLogFluxPayload(
+    current: ReactionStorage,
+    payload: ReactionPayload,
+    now = Date.now(),
+): { event: FluxEventName; state: ReactionStorage } | null {
+    const event = getReactionLogFluxEvent(payload)
+    if (!event) return null
+    return {
+        event,
+        state: applyReactionLogFluxEvent(current, event, payload, now),
+    }
+}
