@@ -24,7 +24,7 @@ assert.match(kotlin, /takePersistableUriPermission/);
 assert.match(kotlin, /DocumentsContract\.createDocument/);
 assert.match(kotlin, /openOutputStream\(document, "wt"\)/);
 assert.match(kotlin, /requireAppContext/);
-assert.match(kotlin, /pluginDir/);
+assert.match(kotlin, /storageDir/);
 assert.match(kotlin, /MAX_AUDIO_BYTES/);
 
 assert.doesNotMatch(js, /saveWithPicker|Create new file|Choose existing file|DocumentsDirPath|CacheDirPath|FileModule|ReactNativeClipboard|lastSavedPath/);

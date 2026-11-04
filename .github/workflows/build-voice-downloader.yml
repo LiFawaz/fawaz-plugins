@@ -78,14 +78,14 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          archive = Path("build/dist/com.lifawaz.voice-message-downloader@1.0.7.zip")
+          archive = Path("build/dist/com.lifawaz.voice-message-downloader@1.0.8.zip")
           assert archive.is_file(), f"Missing build output: {archive}"
           with zipfile.ZipFile(archive) as package:
               assert package.testzip() is None, "Plugin ZIP integrity check failed"
               names = set(package.namelist())
               assert {"manifest.json", "index.js", "plugin.jar"} <= names, names
               manifest = json.loads(package.read("manifest.json"))
-              assert manifest["version"] == "1.0.7"
+              assert manifest["version"] == "1.0.8"
               assert manifest["dist"]["android"]["class"] == "com.lifawaz.voicemessagedownloader.VoiceMessageDownloader"
               native_jar = zipfile.ZipFile(package.open("plugin.jar"))
               assert "classes.dex" in native_jar.namelist(), native_jar.namelist()
@@ -102,7 +102,7 @@ jobs:
           from pathlib import Path
           
           plugin_id = "com.lifawaz.voice-message-downloader"
-          version = "1.0.7"
+          version = "1.0.8"
           archive = Path(f"build/dist/{plugin_id}@{version}.zip")
           pool = Path("pool")
           pool.mkdir(exist_ok=True)
@@ -128,12 +128,12 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pool/com.lifawaz.voice-message-downloader@1.0.7.zip index.json
-          git diff --cached --quiet || git commit -m "Publish Voice Message Downloader 1.0.7"
+          git add pool/com.lifawaz.voice-message-downloader@1.0.8.zip index.json
+          git diff --cached --quiet || git commit -m "Publish Voice Message Downloader 1.0.8"
           git push
 
       - uses: actions/upload-artifact@v4
         with:
-          name: voice-message-downloader-1.0.7
-          path: build/dist/com.lifawaz.voice-message-downloader@1.0.7.zip
+          name: voice-message-downloader-1.0.8
+          path: build/dist/com.lifawaz.voice-message-downloader@1.0.8.zip
           if-no-files-found: error
