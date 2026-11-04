@@ -774,7 +774,7 @@ internal class ReactionLogHooks(
             target.startsWith("custom:") -> target.removePrefix("custom:")
             target.startsWith("unicode:") -> target.removePrefix("unicode:")
             else -> target
-        }
+        }.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
         return target == entry.emojiKey ||
             normalized == entry.emojiId ||
             normalized == entry.emojiName?.let { Normalizer.normalize(it, Normalizer.Form.NFC) } ||
