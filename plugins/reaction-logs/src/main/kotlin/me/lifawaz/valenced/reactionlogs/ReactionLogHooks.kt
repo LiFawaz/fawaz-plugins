@@ -1110,27 +1110,120 @@ internal class ReactionLogHooks(
         targetApiKey: String? = null,
     ): Any {
         val provider = readMember(widget, "modelProvider") ?: return clearPopupSelection(model)
-        val channelId = readMember(provider, "channelId")?.toString() ?: return clearPopupSelection(model)
-        val messageId = readMember(provider, "messageId")?.toString() ?: return clearPopupSelection(model)
-
-        val reactionItems = readMember(model, "reactionItems") as? List<*> ?: return clearPopupSelection(model)
-        val selectedItem = reactionItems.firstOrNull {
-            readMember(it, "isSelected") == true
-        } ?: targetApiKey?.let { target ->
-            reactionItems.firstOrNull { item ->
-                val reaction = readMember(item, "reaction") ?: return@firstOrNull false
-                val itemEmoji = readMember(reaction, "emoji") ?: return@firstOrNull false
-                emojiMatchesApiKey(itemEmoji, target)
-            }
-        } ?: return clearPopupSelection(model)
-        val selectedReaction = readMember(selectedItem, "reaction") ?: return clearPopupSelection(model)
-        val emoji = readMember(selectedReaction, "emoji") ?: return clearPopupSelection(model)
-        val selectedEmojiKey = emojiKey(emoji) ?: return clearPopupSelection(model)
-        val selectedReactionType = popupTargetReactionType
-            ?: reactionType(selectedReaction, selectedItem)
+        val channelId = snowflakeId(readMember(provider, "channelId")) ?: return clearPopupSelection(model)
+        val messageId = snowflakeId(readMember(provider, "messageId")) ?: return clearPopupSelection(model)
         val channelLong = channelId.toLongOrNull() ?: return clearPopupSelection(model)
         val messageLong = messageId.toLongOrNull() ?: return clearPopupSelection(model)
         val guildId = resolveGuildId(loader, channelLong)
+
+        val baseReactionItems = readMember(model, "reactionItems") as? List<*>
+            ?: return clearPopupSelection(model)
+        val originalItems = readMember(model, "userItems") as? List<*>
+            ?: return clearPopupSelection(model)
+
+        // History is persistent, but only IDs currently present in activeRemovals
+        // are still removed. A later ADD advances the epoch and removes that ID
+        // from this set without deleting the historical record.
+        val historyForMessage = synchronized(removalHistory) {
+            removalHistory.values.filter { entry ->
+                entry.messageId == messageId &&
+                    (entry.channelId.isBlank() || entry.channelId == channelId) &&
+                    (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId)
+            }
+        }.filter { entry ->
+            entry.userId in currentRemovedUsersForReaction(messageId, entry.emojiKey, entry.reactionType)
+        }
+
+        val requestedKey = targetApiKey ?: popupTargetApiKey ?: readWidgetTargetEmoji(widget)
+        val targetEntry = requestedKey?.let { key ->
+            historyForMessage.firstOrNull { entryMatchesApiKey(it, key) }
+        }
+        val previouslySelected = baseReactionItems.firstOrNull {
+            readMember(it, "isSelected") == true
+        }
+        val previouslySelectedEmoji = previouslySelected
+            ?.let { readMember(readMember(it, "reaction"), "emoji") }
+        val previouslySelectedApiKey = previouslySelectedEmoji?.let(::emojiApiKey)
+
+        val selectedApiKey = when {
+            targetEntry != null -> entryApiKey(targetEntry)
+            requestedKey != null && baseReactionItems.any { item ->
+                val reaction = readMember(item, "reaction") ?: return@any false
+                val emoji = readMember(reaction, "emoji") ?: return@any false
+                emojiMatchesApiKey(emoji, requestedKey)
+            } -> requestedKey
+            else -> previouslySelectedApiKey
+        }
+
+        val reactionItems = ArrayList<Any>(baseReactionItems.size + historyForMessage.size)
+        val presentApiKeys = LinkedHashSet<String>()
+        for (item in baseReactionItems) {
+            if (item == null) continue
+            val reaction = readMember(item, "reaction") ?: continue
+            val itemEmoji = readMember(reaction, "emoji") ?: continue
+            val apiKey = emojiApiKey(itemEmoji)
+            if (apiKey != null) presentApiKeys.add(apiKey)
+            val wasSelected = readMember(item, "isSelected") == true
+            val shouldSelect = selectedApiKey?.let { emojiMatchesApiKey(itemEmoji, it) } ?: wasSelected
+            val copied = if (shouldSelect != wasSelected) {
+                createReactionEmojiTabCopy(item, reaction, shouldSelect)
+            } else {
+                null
+            }
+            reactionItems.add(copied ?: item)
+        }
+
+        var insertedSelectedTab = false
+        // If Discord's live model no longer contains the selected emoji, append
+        // a zero-count *real MessageReaction* and the original emoji-tab payload.
+        if (targetEntry != null && presentApiKeys.none { key ->
+                entryMatchesApiKey(targetEntry, key)
+            }) {
+            val template = findReactionTemplate(
+                channelId,
+                messageId,
+                targetEntry.emojiKey,
+                targetEntry.reactionType,
+            )
+            val syntheticReaction = createZeroCountMessageReaction(targetEntry, template, loader)
+            val tab = syntheticReaction?.let {
+                createReactionEmojiTabItem(loader, it, true)
+            }
+            if (tab != null) {
+                reactionItems.add(tab)
+                insertedSelectedTab = true
+                entryApiKey(targetEntry)?.let(presentApiKeys::add)
+            }
+        }
+
+        // Keep the other currently-removed emoji selectable in Discord's original
+        // tabs. These are presentation-only zero-count models; no active count or
+        // StoreMessages reaction is fabricated.
+        for ((emojiKey, group) in historyForMessage.groupBy { it.emojiKey }) {
+            val entry = group.maxByOrNull { it.timestamp ?: 0L } ?: continue
+            val apiKey = entryApiKey(entry) ?: continue
+            if (presentApiKeys.any { existing -> entryMatchesApiKey(entry, existing) }) continue
+            val template = findReactionTemplate(channelId, messageId, emojiKey, entry.reactionType)
+            val syntheticReaction = createZeroCountMessageReaction(entry, template, loader) ?: continue
+            val selectThisTab = targetEntry == null && previouslySelected == null && reactionItems.isEmpty()
+            val tab = createReactionEmojiTabItem(loader, syntheticReaction, selectThisTab) ?: continue
+            reactionItems.add(tab)
+            presentApiKeys.add(apiKey)
+        }
+
+        val selectedItem = reactionItems.firstOrNull { readMember(it, "isSelected") == true }
+            ?: reactionItems.firstOrNull()
+            ?: return clearPopupSelection(model)
+        val selectedReaction = readMember(selectedItem, "reaction") ?: return clearPopupSelection(model)
+        val emoji = readMember(selectedReaction, "emoji") ?: return clearPopupSelection(model)
+        val selectedEmojiKey = emojiKey(emoji) ?: return clearPopupSelection(model)
+        // The popup is scoped by message + emoji, not by normal/burst type.
+        // Retain a type only for row-binding bookkeeping; merge both types below.
+        val selectedReactionType = historyForMessage
+            .filter { it.emojiKey == selectedEmojiKey }
+            .maxByOrNull { it.timestamp ?: 0L }
+            ?.reactionType
+            ?: reactionType(selectedReaction, selectedItem)
 
         detailsGuildId = guildId
         detailsChannelId = channelId
@@ -1138,44 +1231,43 @@ internal class ReactionLogHooks(
         detailsEmojiKey = selectedEmojiKey
         detailsReactionType = selectedReactionType
 
-        val originalItems = readMember(model, "userItems") as? List<*> ?: return clearPopupSelection(model)
+        val currentRemovedIds = synchronized(removedUsersByKey) {
+            removedUsersByKey
+                .filterKeys { it.startsWith("$messageId|$selectedEmojiKey|") }
+                .values
+                .flatten()
+                .toSet()
+        }
+        val historyForSelection = historyForMessage
+            .filter { it.emojiKey == selectedEmojiKey && it.userId in currentRemovedIds }
+            .groupBy { it.userId }
+            .values
+            .mapNotNull { records -> records.maxByOrNull { it.timestamp ?: 0L } }
+            .sortedBy { it.timestamp ?: 0L }
 
+        // Discord's user list is per emoji. A person active on either normal or
+        // burst for this emoji must not be duplicated or coloured as removed.
         val activeForSelection = synchronized(activeReactions) {
             activeReactions.filter { active ->
                 active.channelId == channelId &&
                     active.messageId == messageId &&
                     active.emojiKey == selectedEmojiKey &&
-                    active.reactionType == selectedReactionType &&
                     (active.guildId.isNullOrBlank() || guildId.isNullOrBlank() || active.guildId == guildId)
-            }.toList()
+            }.distinctBy { it.userId }
         }
+        val currentActiveIds = activeForSelection.mapTo(LinkedHashSet()) { it.userId }
         val selectionRetryKey = userRowKey(guildId, channelId, messageId, selectedEmojiKey, selectedReactionType, "")
         if (popupRetryKey != selectionRetryKey) {
             cancelPopupRetry()
             popupRetryKey = selectionRetryKey
         }
 
-        // activeRemovals is computed by TypeScript from the current epoch and
-        // active-reaction state. Use it as the authority for current red popup rows;
-        // removalHistory also contains older records superseded by a later ADD.
-        val currentRemovedIds = synchronized(removedUsersByKey) {
-            removedUsersByKey[reactionKey(messageId, selectedEmojiKey, selectedReactionType)].orEmpty().toSet()
-        }
-        val historyForSelection = synchronized(removalHistory) {
-            removalHistory.values.filter { entry ->
-                entry.userId in currentRemovedIds &&
-                    entry.messageId == messageId &&
-                    (entry.channelId.isBlank() || entry.channelId == channelId) &&
-                    entry.emojiKey == selectedEmojiKey &&
-                    entry.reactionType == selectedReactionType &&
-                    (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId)
-            }.sortedBy { it.timestamp ?: 0L }
-        }
-
-        val currentActiveIds = activeForSelection.mapTo(LinkedHashSet()) { it.userId }
-        val existingUsers = originalItems.mapNotNull(::extractUserId).toMutableSet()
-        val output = ArrayList<Any>(originalItems.size + 8)
-        originalItems.filterNotNullTo(output)
+        // When a newly inserted zero-count tab is selected, the original userItems
+        // belong to the previously selected emoji and must not leak into this tab.
+        val effectiveOriginalItems = if (insertedSelectedTab) emptyList<Any>() else originalItems
+        val existingUsers = effectiveOriginalItems.mapNotNull(::extractUserId).toMutableSet()
+        val output = ArrayList<Any>(effectiveOriginalItems.size + historyForSelection.size + 4)
+        effectiveOriginalItems.filterNotNullTo(output)
 
         for (active in activeForSelection) {
             if (!existingUsers.add(active.userId)) continue
@@ -1190,16 +1282,10 @@ internal class ReactionLogHooks(
         var unresolvedUsers = false
         for (entry in historyForSelection) {
             if (entry.userId in currentActiveIds) continue
-            // Discord can dispatch the removal before its popup model refreshes.
-            // Briefly mark that stale row red, then re-check the model. For older
-            // history, a user already present in Discord's active list is authoritative
-            // evidence that the reaction is active again (including while the plugin
-            // was unloaded and could not observe the ADD event).
             if (entry.userId in existingUsers) {
-                // A just-dispatched REMOVE can arrive before Discord refreshes the
-                // currently open popup's userItems. Keep that stale row red briefly;
-                // after the grace period the live Discord list is authoritative,
-                // which also prevents old history from painting a later re-ADD red.
+                // Flux REMOVE is observed before Discord refreshes an already-open
+                // popup. A still-present row is red only during that short race;
+                // after that, a live Discord row is authoritative evidence of ADD.
                 val removedAt = entry.timestamp ?: 0L
                 val recentRemoval = removedAt > 0L &&
                     System.currentTimeMillis() >= removedAt &&
@@ -1207,6 +1293,7 @@ internal class ReactionLogHooks(
                 if (recentRemoval) removedIds.add(entry.userId)
                 continue
             }
+
             val member = guildId?.let { resolveGuildMember(loader, it, entry.userId) }
             val user = resolveUser(loader, entry.userId) ?: readMember(member, "user")
             if (user == null) {
@@ -1226,48 +1313,41 @@ internal class ReactionLogHooks(
         synchronized(popupRemovedUsers) {
             popupRemovedUsers.clear()
             removedIds.forEach { userId ->
-                popupRemovedUsers.add(userRowKey(guildId, channelId, messageId, selectedEmojiKey, selectedReactionType, userId))
+                popupRemovedUsers.add(
+                    userRowKey(guildId, channelId, messageId, selectedEmojiKey, selectedReactionType, userId),
+                )
             }
         }
         refreshUserRows()
         if (unresolvedUsers) schedulePopupRetry(selectionRetryKey) else cancelPopupRetry()
 
-        if (output == originalItems) return model
+        if (reactionItems == baseReactionItems && output == originalItems) return model
         if (removedIds.isNotEmpty()) {
-            XposedBridge.log("Reaction Logs: appended ${removedIds.size} removed user row(s) to Discord's original popup")
+            XposedBridge.log(
+                "Reaction Logs: original popup includes " + removedIds.size +
+                    " removed user(s) for the selected emoji",
+            )
         }
+
         val copy = model.javaClass.methods.firstOrNull {
             it.name == "copy" &&
                 it.parameterCount == 2 &&
                 it.parameterTypes[0].isAssignableFrom(reactionItems.javaClass) &&
                 it.parameterTypes[1].isAssignableFrom(output.javaClass)
         }
-        val copied = copy?.let {
-            runCatching { it.invoke(model, reactionItems, output) }.getOrNull()
-        }
+        val copied = copy?.let { runCatching { it.invoke(model, reactionItems, output) }.getOrNull() }
         if (copied != null) return copied
 
-        // If the Kotlin data-class copy method is unavailable or incompatible,
-        // try the actual two-list constructor instead of silently returning the
-        // unmodified model.
         val constructor = model.javaClass.declaredConstructors.firstOrNull {
             it.parameterCount == 2 &&
                 it.parameterTypes[0].isAssignableFrom(reactionItems.javaClass) &&
                 it.parameterTypes[1].isAssignableFrom(output.javaClass)
-        }
-        if (constructor == null) {
-            XposedBridge.log(
-                "Reaction Logs: cannot copy ManageReactions model; copyMethods=" +
-                    model.javaClass.methods.filter { it.name == "copy" }.joinToString { it.toGenericString() } +
-                    ", constructors=" + model.javaClass.declaredConstructors.joinToString { it.toGenericString() },
-            )
-            return model
-        }
+        } ?: return model
         return runCatching {
             constructor.isAccessible = true
             constructor.newInstance(reactionItems, output)
         }.onFailure {
-            XposedBridge.log("Reaction Logs: ManageReactions model copy/constructor failed: $it")
+            XposedBridge.log("Reaction Logs: original popup model copy failed: $it")
         }.getOrNull() ?: model
     }
 
