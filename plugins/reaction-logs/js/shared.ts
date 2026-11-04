@@ -7,6 +7,9 @@ export interface EmojiPayload {
 }
 
 export interface ReactionPayload {
+    // Valenced Flux dispatch discriminator (for example MESSAGE_REACTION_REMOVE).
+    // This is not the normal/burst reaction type.
+    type?: string
     channelId?: string | number
     channel_id?: string | number
     messageId?: string | number
