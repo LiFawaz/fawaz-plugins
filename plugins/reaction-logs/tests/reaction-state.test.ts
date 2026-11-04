@@ -404,4 +404,22 @@ describe('Reaction Logs event state', () => {
         expect(buildNativeSnapshot(current, 60).activeRemovals).toHaveLength(0)
     })
 
+    test('legacy migrated removals stay superseded after a matching ADD and bulk clear', () => {
+        let current = normalizeReactionStorage({
+            activeRemovals: [
+                { pillKey: 'message-1|heart|0', removedUsers: ['user-1'] },
+            ],
+        }, 10)
+        expect(buildNativeSnapshot(current, 10).activeRemovals).toHaveLength(1)
+
+        current = applyReactionAdd(current, base(), 20)
+        current = applyRemoveAll(current, {
+            channel_id: 'channel-1',
+            message_id: 'message-1',
+        }, 30)
+
+        expect(current.removalHistory).toHaveLength(1)
+        expect(buildNativeSnapshot(current, 30).activeRemovals).toHaveLength(0)
+    })
+
 })
