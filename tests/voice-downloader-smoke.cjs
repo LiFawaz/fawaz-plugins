@@ -11,7 +11,7 @@ const kotlin = fs.readFileSync(ktPath, 'utf8');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
 assert.equal(manifest.id, 'com.lifawaz.voice-message-downloader');
-assert.equal(manifest.version, '1.0.7');
+assert.equal(manifest.version, '1.0.8');
 assert.equal(manifest.dist.script, 'index.js');
 assert.equal(manifest.dist.android.path, 'plugin.jar');
 assert.equal(manifest.dist.android.class, 'com.lifawaz.voicemessagedownloader.VoiceMessageDownloader');
