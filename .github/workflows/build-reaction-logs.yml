@@ -108,7 +108,7 @@ jobs:
           plugin["description"] = manifest["description"]
           plugin.setdefault("channels", {})["latest"] = version
           plugin.setdefault("versions", {})[version] = {
-              "url": f"https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/{plugin_id}%40{version}.zip",
+              "url": f"https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/{plugin_id}%40{version}.zip",
               "sha256": hashlib.sha256(data).hexdigest(),
               "size": len(data),
               "dependencies": manifest.get("dependencies", {}),
