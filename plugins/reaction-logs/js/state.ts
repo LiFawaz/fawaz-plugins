@@ -305,7 +305,7 @@ export function applyReactionRemove(
     now = Date.now(),
 ): ReactionStorage {
     const state = normalizeReactionStorage(input, now)
-    const identity = identityFromPayload(payload)
+    const identity = reactionIdentityFromPayload(payload)
     if (!identity) return state
 
     const epoch = state.epochs[identity.identityKey] ?? 0
