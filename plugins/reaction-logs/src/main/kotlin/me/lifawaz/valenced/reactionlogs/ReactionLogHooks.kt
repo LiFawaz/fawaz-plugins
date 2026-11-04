@@ -34,8 +34,6 @@ private const val MANAGE_REACTIONS_MODEL_PROVIDER =
     "com.discord.widgets.chat.managereactions.ManageReactionsModelProvider"
 private const val MANAGE_REACTIONS_WIDGET =
     "com.discord.widgets.chat.managereactions.WidgetManageReactions"
-private const val MANAGE_REACTIONS_MODEL_PROVIDER =
-    "com.discord.widgets.chat.managereactions.ManageReactionsModelProvider"
 private const val MANAGE_REACTIONS_MODEL =
     "com.discord.widgets.chat.managereactions.ManageReactionsModel"
 private const val MANAGE_REACTIONS_EMOJI_ITEM =
@@ -123,6 +121,7 @@ internal class ReactionLogHooks(
     private var popupRetryAttempts = 0
     private var popupRetryRunnable: Runnable? = null
     @Volatile private var popupTargetApiKey: String? = null
+    @Volatile private var popupTargetReactionType: Int? = null
     // Keep reaction data models, not Android views: ShortcutsFlexbox recycles its
     // ten ReactionView children for different emoji during every setReactions call.
     private val reactionTemplates = LinkedHashMap<ReactionModelKey, Any>()
@@ -749,14 +748,26 @@ internal class ReactionLogHooks(
         return name?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
     }
 
-    private fun currentRemovedUsersForEmoji(messageId: String, emojiKey: String): Set<String> =
-        synchronized(removedUsersByKey) {
-            removedUsersByKey
-                .filterKeys { it.startsWith("$messageId|$emojiKey|") }
-                .values
-                .flatten()
-                .toSet()
+    private fun currentRemovedUsersForReaction(
+        messageId: String,
+        emojiKey: String,
+        reactionType: Int,
+    ): Set<String> = synchronized(removedUsersByKey) {
+        removedUsersByKey[reactionKey(messageId, emojiKey, reactionType)].orEmpty()
+    }
+
+    private fun entryMatchesApiKey(entry: RemovalEntry, targetApiKey: String): Boolean {
+        val target = targetApiKey.trim()
+        val normalized = when {
+            target.startsWith("custom:") -> target.removePrefix("custom:")
+            target.startsWith("unicode:") -> target.removePrefix("unicode:")
+            else -> target
         }
+        return target == entry.emojiKey ||
+            normalized == entry.emojiId ||
+            normalized == entry.emojiName ||
+            (entry.emojiId != null && target.endsWith(":${entry.emojiId}"))
+    }
 
     private fun hasRemovalForTarget(widget: Any, targetApiKey: String, loader: ClassLoader): Boolean {
         val provider = readMember(widget, "modelProvider") ?: return false
@@ -768,11 +779,11 @@ internal class ReactionLogHooks(
                 entry.messageId == messageId &&
                     (entry.channelId.isBlank() || entry.channelId == channelId) &&
                     (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId) &&
-                    entryApiKey(entry) == targetApiKey
+                    entryMatchesApiKey(entry, targetApiKey)
             }
         }
         return candidates.any { entry ->
-            entry.userId in currentRemovedUsersForEmoji(messageId, entry.emojiKey)
+            entry.userId in currentRemovedUsersForReaction(messageId, entry.emojiKey, entry.reactionType)
         }
     }
 
@@ -797,13 +808,6 @@ internal class ReactionLogHooks(
         template: Any?,
         loader: ClassLoader,
     ): Any? = runCatching {
-        val emoji = template?.let { readMember(it, "emoji") }
-            ?: createEmojiModel(
-                entry,
-                loader.loadClass("com.discord.chat.bridge.reaction.MessageReactionEmoji"),
-            )
-            ?: return@runCatching null
-
         val modelClass = loader.loadClass(MESSAGE_REACTION_MODEL)
         val constructor = modelClass.declaredConstructors.firstOrNull { candidate ->
             val types = candidate.parameterTypes
@@ -811,9 +815,19 @@ internal class ReactionLogHooks(
                 types[0] == Int::class.javaPrimitiveType &&
                 types[1] == Boolean::class.javaPrimitiveType &&
                 types[2] == Boolean::class.javaPrimitiveType &&
-                types[3].isAssignableFrom(emoji.javaClass) &&
                 types[4] == Int::class.javaPrimitiveType
-        } ?: return@runCatching null
+        } ?: run {
+            XposedBridge.log(
+                "Reaction Logs: no compatible MessageReaction constructor; candidates=" +
+                    modelClass.declaredConstructors.joinToString { it.toGenericString() },
+            )
+            return@runCatching null
+        }
+        val emojiType = constructor.parameterTypes[3]
+        val templateEmoji = template?.let { readMember(it, "emoji") }
+            ?.takeIf { emojiType.isAssignableFrom(it.javaClass) }
+        val emoji = templateEmoji ?: createEmojiModel(entry, emojiType)
+            ?: return@runCatching null
         constructor.isAccessible = true
         constructor.newInstance(0, false, false, emoji, 0, null)
     }.onFailure {
@@ -870,7 +884,7 @@ internal class ReactionLogHooks(
                     (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId)
             }
         }.filter { entry ->
-            entry.userId in currentRemovedUsersForEmoji(messageId, entry.emojiKey)
+            entry.userId in currentRemovedUsersForReaction(messageId, entry.emojiKey, entry.reactionType)
         }
         if (history.isEmpty()) return null
 
@@ -892,8 +906,10 @@ internal class ReactionLogHooks(
             .mapNotNull { group -> group.maxByOrNull { it.timestamp ?: 0L } }
             .sortedByDescending { it.timestamp ?: 0L }
         val selected = uniqueEntries.firstOrNull {
-            targetApiKey != null && entryApiKey(it) == targetApiKey
+            targetApiKey != null && entryMatchesApiKey(it, targetApiKey)
         } ?: uniqueEntries.first()
+        popupTargetApiKey = targetApiKey ?: entryApiKey(selected)
+        popupTargetReactionType = selected.reactionType
 
         for (entry in uniqueEntries) {
             val apiKey = entryApiKey(entry) ?: continue
@@ -1044,6 +1060,7 @@ internal class ReactionLogHooks(
         detailsEmojiKey = null
         detailsReactionType = 0
         popupTargetApiKey = null
+        popupTargetReactionType = null
         synchronized(popupRemovedUsers) { popupRemovedUsers.clear() }
         cancelPopupRetry()
         popupRetryKey = null
@@ -1055,7 +1072,12 @@ internal class ReactionLogHooks(
         return model
     }
 
-    private fun augmentReactionPopup(widget: Any, model: Any, loader: ClassLoader): Any {
+    private fun augmentReactionPopup(
+        widget: Any,
+        model: Any,
+        loader: ClassLoader,
+        targetApiKey: String? = null,
+    ): Any {
         val provider = readMember(widget, "modelProvider") ?: return clearPopupSelection(model)
         val channelId = readMember(provider, "channelId")?.toString() ?: return clearPopupSelection(model)
         val messageId = readMember(provider, "messageId")?.toString() ?: return clearPopupSelection(model)
@@ -1063,11 +1085,20 @@ internal class ReactionLogHooks(
         val reactionItems = readMember(model, "reactionItems") as? List<*> ?: return clearPopupSelection(model)
         val selectedItem = reactionItems.firstOrNull {
             readMember(it, "isSelected") == true
+        } ?: targetApiKey?.let { target ->
+            reactionItems.firstOrNull { item ->
+                val reaction = readMember(item, "reaction") ?: return@firstOrNull false
+                val itemEmoji = readMember(reaction, "emoji") ?: return@firstOrNull false
+                emojiApiKey(itemEmoji)?.let { apiKey ->
+                    apiKey == target || target.endsWith(":$apiKey")
+                } == true
+            }
         } ?: return clearPopupSelection(model)
         val selectedReaction = readMember(selectedItem, "reaction") ?: return clearPopupSelection(model)
         val emoji = readMember(selectedReaction, "emoji") ?: return clearPopupSelection(model)
         val selectedEmojiKey = emojiKey(emoji) ?: return clearPopupSelection(model)
-        val selectedReactionType = reactionType(selectedReaction, selectedItem)
+        val selectedReactionType = popupTargetReactionType
+            ?: reactionType(selectedReaction, selectedItem)
         val channelLong = channelId.toLongOrNull() ?: return clearPopupSelection(model)
         val messageLong = messageId.toLongOrNull() ?: return clearPopupSelection(model)
         val guildId = resolveGuildId(loader, channelLong)
