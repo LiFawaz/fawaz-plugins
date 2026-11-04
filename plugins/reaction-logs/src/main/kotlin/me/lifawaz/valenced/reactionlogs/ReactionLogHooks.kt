@@ -393,21 +393,31 @@ internal class ReactionLogHooks(
             }
         } ?: error("MessageAccessoriesAdapter.onBindViewHolder not found")
 
-        // Ask DexFinder for the actual adapter list field instead of assuming
-        // that there is exactly one List field in this Discord version.
-        val adapterItems = dexFinder.findField {
-            matcher {
-                declaredClass(onBindViewHolder.declaringClass.name)
-                type(List::class.java)
-            }
-        } ?: error("MessageAccessoriesAdapter.items not found")
+        // Resolve the actual item list by inspecting the value at the bound
+        // position. A RecyclerView adapter may own more than one List field, so
+        // choosing the first List field can bind the wrong message identity.
+        val adapterItemFields = generateSequence(onBindViewHolder.declaringClass) { it.superclass }
+            .flatMap { it.declaredFields.asSequence() }
+            .filter { List::class.java.isAssignableFrom(it.type) }
+            .onEach { it.isAccessible = true }
+            .toList()
+        if (adapterItemFields.isEmpty()) error("MessageAccessoriesAdapter item list not found")
 
-        // MessageAccessory itself has messageId and accessoryDescription only.
-        // The current channel lives on MessageAccessoriesAdapter.setItems(...).
-        val adapterChannelId = onBindViewHolder.declaringClass.declaredFields
+        // MessageAccessory itself has no channel ID in some Discord builds. Read
+        // the adapter field/property when available, but do not disable pill
+        // retention solely because a superclass owns the field.
+        val adapterChannelId = generateSequence(onBindViewHolder.declaringClass) { it.superclass }
+            .flatMap { it.declaredFields.asSequence() }
             .firstOrNull { it.name == "channelId" }
             ?.apply { isAccessible = true }
-            ?: error("MessageAccessoriesAdapter.channelId not found")
+
+        var missingBindingLogged = false
+        XposedBridge.log(
+            "Reaction Logs: pill hooks resolved bind=${onBindViewHolder.toGenericString()}, " +
+                "setReactions=${setReactions.toGenericString()}, " +
+                "itemFields=${adapterItemFields.joinToString { it.name }}, " +
+                "channelField=${adapterChannelId?.name ?: "property fallback"}",
+        )
 
         val setReactions = dexFinder.findMethod {
             matcher {
@@ -419,18 +429,29 @@ internal class ReactionLogHooks(
         unhooks += onBindViewHolder.hook(
             before = { param ->
                 val index = param.args.getOrNull(1) as? Int
-                val item = index?.let {
-                    (adapterItems.get(param.thisObject) as? List<*>)?.getOrNull(it)
+                val item = index?.let { position ->
+                    adapterItemFields.firstNotNullOfOrNull { field ->
+                        val values = runCatching { field.get(param.thisObject) as? List<*> }.getOrNull()
+                        values?.getOrNull(position)?.takeIf(accessoryClass::isInstance)
+                    }
                 }
-                if (item != null && accessoryClass.isInstance(item)) {
+                if (item != null) {
                     bindingMessageId.set(accessoryMessageId.invoke(item)?.toString())
                     bindingChannelId.set(
-                        snowflakeId(adapterChannelId.get(param.thisObject))
+                        adapterChannelId?.let { field ->
+                            runCatching { snowflakeId(field.get(param.thisObject)) }.getOrNull()
+                        } ?: snowflakeId(readMember(param.thisObject, "channelId"))
                             ?: snowflakeId(readMember(item, "channelId")),
                     )
                 } else {
                     bindingMessageId.remove()
                     bindingChannelId.remove()
+                    if (!missingBindingLogged) {
+                        missingBindingLogged = true
+                        XposedBridge.log(
+                            "Reaction Logs: could not resolve MessageAccessory at onBindViewHolder position=$index",
+                        )
+                    }
                 }
             },
             after = {
@@ -441,7 +462,14 @@ internal class ReactionLogHooks(
 
         unhooks += setReactions.hook(
             before = { param ->
-                val messageId = bindingMessageId.get() ?: return@hook
+                val messageId = bindingMessageId.get()
+                if (messageId == null) {
+                    if (!missingBindingLogged) {
+                        missingBindingLogged = true
+                        XposedBridge.log("Reaction Logs: setReactions ran without a bound message ID")
+                    }
+                    return@hook
+                }
                 val channelId = bindingChannelId.get()
                 val flexbox = param.thisObject as? ViewGroup ?: return@hook
                 for (index in 0 until flexbox.childCount) {
@@ -481,8 +509,18 @@ internal class ReactionLogHooks(
                 val markers = synchronized(removedUsersByKey) {
                     removedUsersByKey.keys.filter { it.startsWith("$messageId|") }.toList()
                 }
-                if (markers.isEmpty()) return@hook
+                if (markers.isEmpty()) {
+                    XposedBridge.log(
+                        "Reaction Logs: setReactions bound message=$messageId channel=${channelId ?: "unknown"} " +
+                            "incoming=${incoming.size}, no retained removal markers",
+                    )
+                    return@hook
+                }
 
+                XposedBridge.log(
+                    "Reaction Logs: setReactions bound message=$messageId channel=${channelId ?: "unknown"} " +
+                        "incoming=${incoming.size}, retainedMarkers=${markers.size}",
+                )
                 val expanded = ArrayList<Any>(incoming.size + markers.size)
                 incoming.filterNotNullTo(expanded)
                 var injected = 0
