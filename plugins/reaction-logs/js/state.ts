@@ -44,9 +44,13 @@ function getString(
 }
 
 function reactionType(payload: ReactionPayload): number {
-    const value = payload.reactionType ?? payload.reaction_type
+    const value = payload.reactionType ?? payload.reaction_type ?? payload.type
     if (typeof value === 'number' && Number.isFinite(value)) return value
-    if (typeof payload.type === 'number' && Number.isFinite(payload.type)) return payload.type
+    if (typeof value === 'string') {
+        const parsed = Number(value)
+        if (Number.isInteger(parsed) && Number.isFinite(parsed)) return parsed
+        if (value.toLowerCase() === 'burst') return 1
+    }
     return payload.burst === true ? 1 : 0
 }
 
@@ -299,6 +303,8 @@ export function applyReactionAdd(
     return normalizeReactionStorage(state, now)
 }
 
+export const REMOVE_DEDUPE_WINDOW_MS = 5_000
+
 export function applyReactionRemove(
     input: ReactionStorage,
     payload: ReactionPayload,
@@ -308,33 +314,50 @@ export function applyReactionRemove(
     const identity = reactionIdentityFromPayload(payload)
     if (!identity) return state
 
-    const epoch = state.epochs[identity.identityKey] ?? 0
-    const id = removalId(identity.identityKey, epoch)
-    const existing = state.removalHistory.some(item => item.id === id)
     const active = new Map(state.activeReactions.map(item => [activeReactionKey(item), item]))
+    const wasActive = active.has(identity.identityKey)
+
+    // A repeated Flux REMOVE without an intervening ADD is the same transition.
+    // A bounded window also lets a later REMOVE be recorded after an ADD happened
+    // while the plugin was stopped and therefore could not observe that ADD.
+    if (!wasActive && state.removalHistory.some(item =>
+        item.identityKey === identity.identityKey &&
+        item.timestamp != null &&
+        now >= item.timestamp &&
+        now - item.timestamp <= REMOVE_DEDUPE_WINDOW_MS
+    )) return state
+
+    let epoch = state.epochs[identity.identityKey] ?? 0
+    let id = removalId(identity.identityKey, epoch)
+    while (state.removalHistory.some(item => item.id === id)) {
+        epoch++
+        id = removalId(identity.identityKey, epoch)
+    }
+
     active.delete(identity.identityKey)
     state.activeReactions = [...active.values()]
 
-    if (!existing) {
-        const record: RemovalRecord = {
-            id,
-            identityKey: identity.identityKey,
-            guildId: identity.guildId,
-            channelId: identity.channelId,
-            messageId: identity.messageId,
-            userId: identity.userId,
-            emojiId: identity.emojiId,
-            emojiName: identity.emojiName,
-            emojiSrc: identity.emojiSrc,
-            emojiDisplayName: identity.emojiDisplayName,
-            emojiAnimated: identity.emojiAnimated,
-            emojiKey: identity.emojiKey,
-            reactionType: identity.reactionType,
-            timestamp: now,
-            epoch,
-        }
-        state.removalHistory.push(record)
+    const record: RemovalRecord = {
+        id,
+        identityKey: identity.identityKey,
+        guildId: identity.guildId,
+        channelId: identity.channelId,
+        messageId: identity.messageId,
+        userId: identity.userId,
+        emojiId: identity.emojiId,
+        emojiName: identity.emojiName,
+        emojiSrc: identity.emojiSrc,
+        emojiDisplayName: identity.emojiDisplayName,
+        emojiAnimated: identity.emojiAnimated,
+        emojiKey: identity.emojiKey,
+        reactionType: identity.reactionType,
+        timestamp: now,
+        epoch,
     }
+    state.removalHistory.push(record)
+    // Reserve the next epoch so a later removal can be recorded even if the
+    // corresponding ADD happened while this plugin was inactive.
+    state.epochs[identity.identityKey] = epoch + 1
 
     return normalizeReactionStorage(state, now)
 }
