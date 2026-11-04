@@ -308,6 +308,7 @@ export function applyReactionRemove(
     return {
         storage: normalizeStorage(storage, now),
         activeReactions: normalizeActiveReactions([...active.values()]),
+        sessionStartedAt: input.sessionStartedAt,
     }
 }
 
