@@ -1044,13 +1044,27 @@ internal class ReactionLogHooks(
 
     private fun resolveGuildMember(loader: ClassLoader, guildId: String, userId: String): Any? = runCatching {
         val guilds = resolveStore(loader, "getGuilds") ?: return@runCatching null
+        val numericGuildId = guildId.toLongOrNull() ?: return@runCatching null
+        val numericUserId = userId.toLongOrNull() ?: return@runCatching null
+
+        // Prefer the store's direct lookup when this Discord build exposes it.
+        val directGetter = guilds.javaClass.methods.firstOrNull {
+            it.name == "getMember" &&
+                it.parameterCount == 2 &&
+                it.parameterTypes[0] in setOf(Long::class.javaPrimitiveType, Long::class.java) &&
+                it.parameterTypes[1] in setOf(Long::class.javaPrimitiveType, Long::class.java)
+        }
+        directGetter?.let { method ->
+            runCatching { method.invoke(guilds, numericGuildId, numericUserId) }.getOrNull()
+                ?.let { return@runCatching it }
+        }
+
         val members = guilds.javaClass.methods.firstOrNull {
             it.name == "getMembers" && it.parameterCount == 0
         }?.invoke(guilds) as? Map<*, *> ?: return@runCatching null
-        val guildMembers = members[guildId.toLongOrNull()] as? Map<*, *>
+        val guildMembers = members[numericGuildId] as? Map<*, *>
             ?: members[guildId] as? Map<*, *>
             ?: return@runCatching null
-        val numericUserId = userId.toLongOrNull()
         guildMembers[numericUserId] ?: guildMembers[userId]
     }.getOrNull()
 
