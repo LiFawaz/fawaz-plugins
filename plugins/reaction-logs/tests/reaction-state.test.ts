@@ -368,6 +368,16 @@ describe('Reaction Logs event state', () => {
         expect(Object.keys(current.epochs)).toHaveLength(MAX_ACTIVE_REACTIONS)
     })
 
+    test('Gateway burst flag wins over generic type aliases', () => {
+        const current = applyReactionRemove(state(), base({
+            type: 'MESSAGE_REACTION_REMOVE',
+            reaction_type: 0,
+            burst: true,
+        }), 51)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.removalHistory[0].reactionType).toBe(1)
+    })
+
     test('Flux dispatch type is not mistaken for the reaction kind', () => {
         const current = applyReactionRemove(state(), base({
             type: 'MESSAGE_REACTION_REMOVE',
