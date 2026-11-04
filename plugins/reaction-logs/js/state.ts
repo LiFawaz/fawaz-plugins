@@ -44,7 +44,7 @@ function getString(
 }
 
 function reactionType(payload: ReactionPayload): number {
-    const value = payload.reactionType ?? payload.reaction_type ?? payload.type
+    const value = payload.reactionType ?? payload.reaction_type
     if (typeof value === 'number' && Number.isFinite(value)) return value
     if (typeof value === 'string') {
         const parsed = Number(value)
