@@ -48,7 +48,6 @@ private data class ReactionModelKey(
 
 private val REMOVED_RED = Color.rgb(237, 66, 69)
 private val REMOVED_TINT = Color.argb(48, 237, 66, 69)
-private const val STALE_ACTIVE_ROW_GRACE_MS = 5_000L
 
 internal class ReactionLogHooks(
     dexFinder: DexFinder,
@@ -290,6 +289,7 @@ internal class ReactionLogHooks(
         synchronized(activeReactions) { activeReactions.clear() }
         synchronized(popupRemovedUsers) { popupRemovedUsers.clear() }
         synchronized(reactionTemplates) { reactionTemplates.clear() }
+        synchronized(syntheticReactionModels) { syntheticReactionModels.clear() }
         mainHandler.post {
             for (pill in boundPillViews()) {
                 if (syntheticPillViews.containsKey(pill)) pill.visibility = View.GONE
@@ -319,6 +319,9 @@ internal class ReactionLogHooks(
         cancelPopupRetry()
         synchronized(popupRemovedUsers) { popupRemovedUsers.clear() }
         synchronized(reactionTemplates) { reactionTemplates.clear() }
+        synchronized(syntheticReactionModels) { syntheticReactionModels.clear() }
+        bindingMessageId.remove()
+        bindingChannelId.remove()
         mainHandler.post {
             for (pill in boundPillViews()) {
                 if (syntheticPillViews.containsKey(pill)) pill.visibility = View.GONE
@@ -503,11 +506,10 @@ internal class ReactionLogHooks(
                 }
             },
             after = { param ->
+                val messageId = bindingMessageId.get() ?: return@hook
                 val flexbox = param.thisObject as ViewGroup
                 val reactions = param.args.getOrNull(0) as? List<*> ?: emptyList<Any>()
-                val messageId = bindingMessageId.get()
-                val reactionPills = if (messageId == null) emptyList()
-                    else pills(reactions, getCount, getBurstCount, getEmoji, isBurstReaction)
+                val reactionPills = pills(reactions, getCount, getBurstCount, getEmoji, isBurstReaction)
 
                 for (index in 0 until flexbox.childCount) {
                     val pillView = flexbox.getChildAt(index) as? LinearLayout ?: continue
@@ -804,11 +806,9 @@ internal class ReactionLogHooks(
             // evidence that the reaction is active again (including while the plugin
             // was unloaded and could not observe the ADD event).
             if (entry.userId in existingUsers) {
-                val age = entry.timestamp?.let { System.currentTimeMillis() - it } ?: Long.MAX_VALUE
-                if (age in 0..STALE_ACTIVE_ROW_GRACE_MS) {
-                    removedIds.add(entry.userId)
-                    unresolvedUsers = true
-                }
+                // The original Discord userItems list is authoritative. If the
+                // user is still returned by Discord, do not re-add or paint an
+                // old history record red after they have reacted again.
                 continue
             }
             val user = resolveUser(loader, entry.userId)
@@ -1143,14 +1143,12 @@ internal class ReactionLogHooks(
             return
         }
 
-        val original = originalPillStyles.getOrPut(view) {
+        originalPillStyles.getOrPut(view) {
             val count = countText(view)
             val switcher = countSwitcher(view)
             val labels = LinkedHashMap<Int, Int>()
-            visitViews(view) { child ->
-                if (isReactionLabel(child) && child.id != View.NO_ID) {
-                    labels[child.id] = child.visibility
-                }
+            reactionLabelViews(view).forEach { label ->
+                if (label.id != View.NO_ID) labels[label.id] = label.visibility
             }
             OriginalPillStyle(
                 backgroundTint = view.backgroundTintList,
@@ -1200,15 +1198,28 @@ internal class ReactionLogHooks(
         return name.contains("reaction_label", ignoreCase = true)
     }
 
+    private fun reactionLabelViews(view: LinearLayout): List<View> {
+        // The actual Discord ReactionView owns these views through its generated
+        // ReactionViewBinding. Prefer those typed binding members; use resource
+        // names only as a compatibility fallback for a future layout revision.
+        val binding = readMember(view, "binding")
+        val bound = listOf("reactionLabelLeft", "reactionLabelRight")
+            .mapNotNull { readMember(binding, it) as? View }
+        if (bound.isNotEmpty()) return bound.distinct()
+
+        val fallback = ArrayList<View>(2)
+        visitViews(view) { child -> if (isReactionLabel(child)) fallback.add(child) }
+        return fallback
+    }
+
     private fun setPillCountZero(view: LinearLayout) {
         val switcher = countSwitcher(view) ?: return
+        reactionLabelViews(view).forEach { it.visibility = View.GONE }
         switcher.visibility = View.VISIBLE
-        val count = switcher.currentView as? TextView
-        count?.visibility = View.VISIBLE
-        count?.text = "0"
-        visitViews(view) { child ->
-            if (isReactionLabel(child)) child.visibility = View.GONE
-        }
+        // TextSwitcher.setCurrentText also updates its current child correctly;
+        // setting currentView.text alone can leave a stale outgoing child visible.
+        switcher.setCurrentText("0")
+        (switcher.currentView as? TextView)?.visibility = View.VISIBLE
     }
 
     private fun pills(
