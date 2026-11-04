@@ -752,8 +752,10 @@ internal class ReactionLogHooks(
             cancelPopupRetry()
             popupRetryKey = key
         }
-        if (popupRetryAttempts >= 4 || popupRetryRunnable != null) return
-        val delay = 250L shl popupRetryAttempts
+        // Keep trying while the popup remains available; USER_UPDATE and
+        // GUILD_MEMBER_UPDATE events also trigger an immediate retry through JS.
+        if (popupRetryAttempts >= 8 || popupRetryRunnable != null) return
+        val delay = (250L shl popupRetryAttempts).coerceAtMost(8_000L)
         val retry = Runnable {
             popupRetryRunnable = null
             popupRetryAttempts++
