@@ -25,8 +25,9 @@ function payloadShape(payload: ReactionPayload) {
         emoji: emoji != null,
         emojiId: emoji?.id != null,
         emojiName: emoji?.name != null,
-        reactionType: typeof payload.reactionType === 'number' || typeof payload.reaction_type === 'number',
+        reactionType: payload.reactionType != null || payload.reaction_type != null || payload.type != null,
         guild: payload.guildId != null || payload.guild_id != null,
+        keys: Object.keys(payload as object),
     }
 }
 
@@ -39,7 +40,14 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
     async start({ cleanup, plugin, jsonStorage }) {
         // Await the storage read explicitly. A plugin start can happen before the
         // async JSON document has populated cache, even with load:true configured.
-        const stored = await jsonStorage.get()
+        let stored: ReactionStorage | null | undefined
+        try {
+            stored = await jsonStorage.get()
+        } catch (error) {
+            plugin.reportError('Could not load reaction history; using the last in-memory cache: ' + String(error))
+            console.error('[Reaction Logs] storage read failed', error)
+            stored = jsonStorage.cache
+        }
         let state = normalizeReactionStorage(stored ?? jsonStorage.cache, Date.now())
         let persistQueue: Promise<void> = Promise.resolve()
         let persistSequence = 0
@@ -95,9 +103,9 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         ) => {
             const sequence = ++eventSequence
             const identity = reactionIdentityFromPayload(payload)
-            const before = state.removalHistory.length
+            const beforeIds = new Set(state.removalHistory.map(record => record.id))
             const next = transition(state, payload)
-            const recorded = next.removalHistory.length > before
+            const recorded = next.removalHistory.some(record => !beforeIds.has(record.id))
             console.debug('[Reaction Logs] Flux reaction event received', {
                 event: eventName,
                 sequence,
