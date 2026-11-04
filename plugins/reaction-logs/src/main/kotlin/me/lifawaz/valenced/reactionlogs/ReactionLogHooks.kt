@@ -664,7 +664,7 @@ internal class ReactionLogHooks(
     private fun defaultValue(type: Class<*>): Any? = when (type) {
         java.lang.Boolean.TYPE -> false
         java.lang.Byte.TYPE -> 0.toByte()
-        java.lang.Character.TYPE -> '\\u0000'
+        java.lang.Character.TYPE -> '\u0000'
         java.lang.Short.TYPE -> 0.toShort()
         java.lang.Integer.TYPE -> 0
         java.lang.Long.TYPE -> 0L
