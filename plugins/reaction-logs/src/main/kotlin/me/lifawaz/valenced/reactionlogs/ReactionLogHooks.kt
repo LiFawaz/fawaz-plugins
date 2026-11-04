@@ -749,14 +749,15 @@ internal class ReactionLogHooks(
     }
 
     private fun emojiMatchesApiKey(emoji: Any, targetApiKey: String): Boolean {
+        val target = Normalizer.normalize(targetApiKey, Normalizer.Form.NFC)
         val id = readMember(emoji, "id")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
         val name = readMember(emoji, "name")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
             ?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
-        return targetApiKey == id ||
-            targetApiKey == name ||
-            targetApiKey == "custom:$id" ||
-            targetApiKey == "unicode:$name" ||
-            (id != null && targetApiKey.endsWith(":$id"))
+        return target == id ||
+            target == name ||
+            target == "custom:$id" ||
+            target == "unicode:$name" ||
+            (id != null && target.endsWith(":$id"))
     }
 
     private fun currentRemovedUsersForReaction(
@@ -776,8 +777,8 @@ internal class ReactionLogHooks(
         }
         return target == entry.emojiKey ||
             normalized == entry.emojiId ||
-            normalized == entry.emojiName ||
-            (entry.emojiId != null && target.endsWith(":${entry.emojiId}"))
+            normalized == entry.emojiName?.let { Normalizer.normalize(it, Normalizer.Form.NFC) } ||
+            (entry.emojiId != null && target.endsWith(":" + entry.emojiId))
     }
 
     private fun hasRemovalForTarget(widget: Any, targetApiKey: String, loader: ClassLoader): Boolean {
