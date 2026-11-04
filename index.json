@@ -95,8 +95,8 @@
         },
         "1.3.0": {
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/lifawaz.reaction-logs%401.3.0.zip",
-          "sha256": "ab405a3e04b0443e3ce96ac1772c161afdbb2f80cf5909a56ba2c7016e99be76",
-          "size": 45222,
+          "sha256": "5b088633d5acbacffa5eef7d6c00f6a32e54bfd98ee1d8c8b842afe188e1b1bb",
+          "size": 45289,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
