@@ -22,6 +22,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.lang.reflect.Proxy
 import java.lang.ref.WeakReference
 import java.text.Normalizer
 import java.util.LinkedHashMap
@@ -46,10 +47,25 @@ internal class ReactionLogHooks(
     dexFinder: DexFinder,
     @Suppress("UNUSED_PARAMETER") bridge: ValencedBridge,
 ) {
-    private data class Pill(val emoji: Any?, val burst: Boolean, val count: Int)
+    private data class Pill(
+        val reaction: Any,
+        val emoji: Any?,
+        val burst: Boolean,
+        val count: Int,
+    )
     private data class OriginalPillStyle(
         val backgroundTint: ColorStateList?,
         val countColors: ColorStateList?,
+        val countText: CharSequence?,
+        val countVisibility: Int?,
+        val countSwitcherVisibility: Int?,
+        val labelVisibilities: Map<Int, Int>,
+    )
+    private data class ReactionModelKey(
+        val channelId: String,
+        val messageId: String,
+        val emojiKey: String,
+        val reactionType: Int,
     )
     private data class UserRowBinding(
         val guildId: String?,
@@ -66,6 +82,11 @@ internal class ReactionLogHooks(
         val messageId: String,
         val userId: String,
         val emojiKey: String,
+        val emojiId: String?,
+        val emojiName: String?,
+        val emojiSrc: String?,
+        val emojiDisplayName: String?,
+        val emojiAnimated: Boolean?,
         val reactionType: Int,
         val timestamp: Long?,
     )
@@ -92,14 +113,20 @@ internal class ReactionLogHooks(
     private var popupRetryKey: String? = null
     private var popupRetryAttempts = 0
     private var popupRetryRunnable: Runnable? = null
-    private val retainedPillViews = LinkedHashMap<String, LinearLayout>()
+    // Keep reaction data models, not Android views: ShortcutsFlexbox recycles its
+    // ten ReactionView children for different emoji during every setReactions call.
+    private val reactionTemplates = LinkedHashMap<ReactionModelKey, Any>()
+    private val syntheticReactionModels = WeakHashMap<Any, Boolean>()
+    private val syntheticPillViews = WeakHashMap<LinearLayout, Boolean>()
     private val boundPills = WeakHashMap<LinearLayout, String>()
+    private val pillCounts = WeakHashMap<LinearLayout, Int>()
     private val originalPillStyles = WeakHashMap<LinearLayout, OriginalPillStyle>()
     private val userRows = WeakHashMap<View, UserRowBinding>()
     private val originalUserTextColors = WeakHashMap<TextView, ColorStateList>()
     private val originalUserRowTints = WeakHashMap<View, ColorStateList?>()
     @Volatile private var detailsMessageId: String? = null
     private val bindingMessageId = ThreadLocal<String?>()
+    private val bindingChannelId = ThreadLocal<String?>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val unhooks = mutableListOf<XC_MethodHook.Unhook>()
 
@@ -155,6 +182,11 @@ internal class ReactionLogHooks(
                     messageId = messageId,
                     userId = userId,
                     emojiKey = emojiKey,
+                    emojiId = item.optString("emojiId").takeIf { it.isNotBlank() && it != "null" },
+                    emojiName = item.optString("emojiName").takeIf { it.isNotBlank() && it != "null" },
+                    emojiSrc = item.optString("emojiSrc").takeIf { it.isNotBlank() && it != "null" },
+                    emojiDisplayName = item.optString("emojiDisplayName").takeIf { it.isNotBlank() && it != "null" },
+                    emojiAnimated = if (item.isNull("emojiAnimated")) null else item.optBoolean("emojiAnimated"),
                     reactionType = item.optInt("reactionType", 0),
                     timestamp = if (item.isNull("timestamp")) null else item.optLong("timestamp"),
                 )
@@ -184,12 +216,26 @@ internal class ReactionLogHooks(
             }
         }
 
-        val retainedPillKeys = parsedMarkers.keys.toMutableSet()
-        parsedActive.forEach { retainedPillKeys.add(reactionKey(it.messageId, it.emojiKey, it.reactionType)) }
-        val staleRetainedViews = synchronized(retainedPillViews) {
-            val stale = retainedPillViews.filterKeys { it !in retainedPillKeys }.values.toList()
-            retainedPillViews.keys.retainAll(retainedPillKeys)
-            stale
+        val retainedTemplateKeys = LinkedHashSet<ReactionModelKey>()
+        parsedHistory.values.forEach { entry ->
+            if (entry.channelId.isNotBlank()) {
+                retainedTemplateKeys.add(modelKey(entry.channelId, entry.messageId, entry.emojiKey, entry.reactionType))
+            }
+        }
+        parsedActive.forEach { active ->
+            retainedTemplateKeys.add(modelKey(active.channelId, active.messageId, active.emojiKey, active.reactionType))
+        }
+        synchronized(reactionTemplates) {
+            val iterator = reactionTemplates.keys.iterator()
+            while (iterator.hasNext()) {
+                val cached = iterator.next()
+                val needed = retainedTemplateKeys.any { it == cached } ||
+                    parsedHistory.values.any {
+                        it.channelId.isBlank() && it.messageId == cached.messageId &&
+                            it.emojiKey == cached.emojiKey && it.reactionType == cached.reactionType
+                    }
+                if (!needed) iterator.remove()
+            }
         }
 
         synchronized(removedUsersByKey) {
@@ -205,14 +251,21 @@ internal class ReactionLogHooks(
             activeReactions.addAll(parsedActive)
         }
 
+        XposedBridge.log(
+            "Reaction Logs: native snapshot synced (removedPills=${parsedMarkers.size}, history=${parsedHistory.size}, active=${parsedActive.size})",
+        )
         mainHandler.post {
-            staleRetainedViews.forEach { view ->
-                (view.parent as? ViewGroup)?.removeView(view)
-                boundPills.remove(view)
-                applyPillStyle(view, false)
-            }
             for ((pill, key) in boundPills.entries.toList()) {
-                applyPillStyle(pill, isRemoved(key))
+                val removed = isRemoved(key)
+                if (!removed && syntheticPillViews.containsKey(pill)) {
+                    pill.visibility = View.GONE
+                    syntheticPillViews.remove(pill)
+                    boundPills.remove(pill)
+                    pillCounts.remove(pill)
+                    restorePillStyle(pill)
+                } else {
+                    applyPillStyle(pill, removed, pillCounts[pill] == 0)
+                }
             }
             refreshUserRows()
             refreshPopupModel()
@@ -235,21 +288,16 @@ internal class ReactionLogHooks(
         synchronized(removalHistory) { removalHistory.clear() }
         synchronized(activeReactions) { activeReactions.clear() }
         synchronized(popupRemovedUsers) { popupRemovedUsers.clear() }
-        val retained = synchronized(retainedPillViews) {
-            retainedPillViews.values.toList().also { retainedPillViews.clear() }
-        }
+        synchronized(reactionTemplates) { reactionTemplates.clear() }
         mainHandler.post {
-            retained.forEach { view ->
-                (view.parent as? ViewGroup)?.removeView(view)
-                boundPills.remove(view)
-                applyPillStyle(view, false)
+            for (pill in boundPillViews()) {
+                if (syntheticPillViews.containsKey(pill)) pill.visibility = View.GONE
+                restorePillStyle(pill)
             }
-            for (pill in boundPills.keys.toList()) {
-                applyPillStyle(pill, false)
-            }
-            for (row in userRows.keys.toList()) {
-                applyUserRowStyle(row, false)
-            }
+            boundPills.clear()
+            pillCounts.clear()
+            syntheticPillViews.clear()
+            for (row in userRows.keys.toList()) applyUserRowStyle(row, false)
         }
     }
 
@@ -269,22 +317,16 @@ internal class ReactionLogHooks(
         configurePopupMethod = null
         cancelPopupRetry()
         synchronized(popupRemovedUsers) { popupRemovedUsers.clear() }
-        val retained = synchronized(retainedPillViews) {
-            retainedPillViews.values.toList().also { retainedPillViews.clear() }
-        }
+        synchronized(reactionTemplates) { reactionTemplates.clear() }
         mainHandler.post {
-            retained.forEach { view ->
-                (view.parent as? ViewGroup)?.removeView(view)
-                boundPills.remove(view)
-                applyPillStyle(view, false)
-            }
-            for (pill in boundPills.keys.toList()) {
-                applyPillStyle(pill, false)
-            }
-            for (row in userRows.keys.toList()) {
-                applyUserRowStyle(row, false)
+            for (pill in boundPillViews()) {
+                if (syntheticPillViews.containsKey(pill)) pill.visibility = View.GONE
+                restorePillStyle(pill)
             }
             boundPills.clear()
+            pillCounts.clear()
+            syntheticPillViews.clear()
+            for (row in userRows.keys.toList()) applyUserRowStyle(row, false)
             originalPillStyles.clear()
             userRows.clear()
             originalUserTextColors.clear()
@@ -296,8 +338,10 @@ internal class ReactionLogHooks(
         synchronized(removedUsersByKey) { key in removedUsersByKey }
 
     /**
-     * Keep removed reaction pills visible by retaining and reattaching their real
-     * rendered views after Discord rebuilds the reaction row.
+     * Inject a zero-count Reaction model into Discord's own setReactions input.
+     * ShortcutsFlexbox reuses its child ReactionViews by index and hides the
+     * remainder; holding and reattaching an old LinearLayout therefore rebinds
+     * the wrong emoji when Discord recycles that child.
      */
     private fun hookReactionPills(dexFinder: DexFinder) {
         val accessoryClass = dexFinder.findClass {
@@ -328,9 +372,11 @@ internal class ReactionLogHooks(
         val getEmoji = reactionInterface.methods.single { it.returnType == emojiClass }
         val getBurstCount = reactionInterface.methods.single {
             it.returnType == Int::class.javaPrimitiveType &&
-                it.parameterCount == 0 &&
-                it != getCount
+                it.parameterCount == 0 && it != getCount
         }
+        val isBurstReaction = reactionInterface.methods.firstOrNull {
+            it.name == "isBurstReaction" && it.parameterCount == 0
+        } ?: error("ReactionView.Reaction.isBurstReaction not found")
 
         val onBindViewHolder = dexFinder.findMethod {
             matcher {
@@ -339,9 +385,14 @@ internal class ReactionLogHooks(
             }
         } ?: error("MessageAccessoriesAdapter.onBindViewHolder not found")
 
-        val adapterItems = onBindViewHolder.declaringClass.declaredFields
-            .single { List::class.java.isAssignableFrom(it.type) && !Modifier.isStatic(it.modifiers) }
-            .apply { isAccessible = true }
+        // Ask DexFinder for the actual adapter list field instead of assuming
+        // that there is exactly one List field in this Discord version.
+        val adapterItems = dexFinder.findField {
+            matcher {
+                declaredClass(onBindViewHolder.declaringClass.name)
+                type(List::class.java)
+            }
+        } ?: error("MessageAccessoriesAdapter.items not found")
 
         val setReactions = dexFinder.findMethod {
             matcher {
@@ -354,96 +405,238 @@ internal class ReactionLogHooks(
             before = { param ->
                 val index = param.args.getOrNull(1) as? Int
                 val item = index?.let {
-                    (adapterItems.get(param.thisObject) as List<*>?)?.getOrNull(it)
+                    (adapterItems.get(param.thisObject) as? List<*>)?.getOrNull(it)
                 }
                 if (item != null && accessoryClass.isInstance(item)) {
-                    bindingMessageId.set(accessoryMessageId.invoke(item) as String?)
+                    bindingMessageId.set(accessoryMessageId.invoke(item)?.toString())
+                    bindingChannelId.set(
+                        readMember(item, "channelId")?.toString()?.takeIf { it.isNotBlank() && it != "null" },
+                    )
                 } else {
                     bindingMessageId.remove()
+                    bindingChannelId.remove()
                 }
             },
-            after = { bindingMessageId.remove() },
+            after = {
+                bindingMessageId.remove()
+                bindingChannelId.remove()
+            },
         )
 
         unhooks += setReactions.hook(
             before = { param ->
                 val messageId = bindingMessageId.get() ?: return@hook
+                val channelId = bindingChannelId.get()
                 val flexbox = param.thisObject as? ViewGroup ?: return@hook
                 for (index in 0 until flexbox.childCount) {
                     val pillView = flexbox.getChildAt(index) as? LinearLayout ?: continue
-                    val key = boundPills[pillView] ?: continue
-                    if (key.startsWith("$messageId|") && isRemoved(key)) {
-                        synchronized(retainedPillViews) { retainedPillViews[key] = pillView }
+                    // Restore the native state before Discord reuses this view for
+                    // another reaction. Never preserve its old emoji binding.
+                    restorePillStyle(pillView)
+                    boundPills.remove(pillView)
+                    pillCounts.remove(pillView)
+                    syntheticPillViews.remove(pillView)
+                }
+
+                val incoming = param.args.getOrNull(0) as? List<*> ?: emptyList<Any>()
+                val rendered = pills(incoming, getCount, getBurstCount, getEmoji, isBurstReaction)
+                val currentKeys = rendered.mapNotNull { pill ->
+                    val emoji = pill.emoji ?: return@mapNotNull null
+                    val emojiKey = emojiKey(emoji) ?: return@mapNotNull null
+                    reactionKey(messageId, emojiKey, if (pill.burst) 1 else 0)
+                }.toSet()
+
+                // Cache the actual Discord model before it disappears from the
+                // message's reaction map. Its Emoji instance preserves Discord's
+                // own renderable, src, display name and animation metadata.
+                for (pill in rendered) {
+                    if (pill.count <= 0 || pill.emoji == null) continue
+                    val emojiKey = emojiKey(pill.emoji) ?: continue
+                    val key = modelKey(channelId.orEmpty(), messageId, emojiKey, if (pill.burst) 1 else 0)
+                    synchronized(reactionTemplates) {
+                        reactionTemplates[key] = pill.reaction
+                        while (reactionTemplates.size > 2_000) {
+                            val first = reactionTemplates.keys.firstOrNull() ?: break
+                            reactionTemplates.remove(first)
+                        }
                     }
+                }
+
+                val markers = synchronized(removedUsersByKey) {
+                    removedUsersByKey.keys.filter { it.startsWith("$messageId|") }.toList()
+                }
+                if (markers.isEmpty()) return@hook
+
+                val expanded = ArrayList<Any>(incoming.size + markers.size)
+                incoming.filterNotNullTo(expanded)
+                var injected = 0
+                for (markerKey in markers) {
+                    if (markerKey in currentKeys) continue
+                    val emojiAndType = markerKey.removePrefix("$messageId|")
+                    val type = emojiAndType.substringAfterLast('|').toIntOrNull() ?: continue
+                    val emojiKey = emojiAndType.substringBeforeLast('|')
+                    val entry = synchronized(removalHistory) {
+                        removalHistory.values
+                            .filter {
+                                it.messageId == messageId &&
+                                    it.emojiKey == emojiKey &&
+                                    it.reactionType == type &&
+                                    (it.channelId.isBlank() || channelId == null || it.channelId == channelId)
+                            }
+                            .maxByOrNull { it.timestamp ?: 0L }
+                    } ?: continue
+                    val template = findReactionTemplate(channelId, messageId, emojiKey, type)
+                    val synthetic = createZeroCountReaction(entry, template, reactionInterface, emojiClass)
+                    if (synthetic != null) {
+                        expanded.add(synthetic)
+                        synchronized(syntheticReactionModels) { syntheticReactionModels[synthetic] = true }
+                        injected++
+                    }
+                }
+
+                if (injected > 0) {
+                    param.args[0] = expanded
+                    XposedBridge.log(
+                        "Reaction Logs: injected $injected zero-count reaction model(s) into Discord setReactions",
+                    )
                 }
             },
             after = { param ->
                 val flexbox = param.thisObject as ViewGroup
                 val reactions = param.args.getOrNull(0) as? List<*> ?: emptyList<Any>()
                 val messageId = bindingMessageId.get()
-                val reactionPills = pills(reactions, getCount, getBurstCount, getEmoji)
-                val currentKeys = LinkedHashSet<String>()
+                val reactionPills = if (messageId == null) emptyList()
+                    else pills(reactions, getCount, getBurstCount, getEmoji, isBurstReaction)
 
                 for (index in 0 until flexbox.childCount) {
                     val pillView = flexbox.getChildAt(index) as? LinearLayout ?: continue
                     val pill = reactionPills.getOrNull(index)
 
-                    if (pill == null || messageId == null || pill.count <= 0 || pill.emoji == null) {
+                    if (pill == null || messageId == null || pill.emoji == null) {
                         boundPills.remove(pillView)
-                        applyPillStyle(pillView, false)
+                        pillCounts.remove(pillView)
+                        syntheticPillViews.remove(pillView)
+                        restorePillStyle(pillView)
                         continue
                     }
 
                     val emoji = emojiKey(pill.emoji)
                     if (emoji.isNullOrBlank()) {
                         boundPills.remove(pillView)
-                        applyPillStyle(pillView, false)
+                        pillCounts.remove(pillView)
+                        syntheticPillViews.remove(pillView)
+                        restorePillStyle(pillView)
                         continue
                     }
 
                     val key = reactionKey(messageId, emoji, if (pill.burst) 1 else 0)
-                    currentKeys.add(key)
+                    val synthetic = synchronized(syntheticReactionModels) {
+                        syntheticReactionModels.containsKey(pill.reaction)
+                    }
                     boundPills[pillView] = key
-                    applyPillStyle(pillView, isRemoved(key))
-                }
+                    pillCounts[pillView] = pill.count
+                    if (synthetic) syntheticPillViews[pillView] = true
+                    else syntheticPillViews.remove(pillView)
 
-                if (messageId != null) {
-                    val prefix = "$messageId|"
-                    val retained = synchronized(retainedPillViews) {
-                        retainedPillViews.entries
-                            .filter { it.key.startsWith(prefix) }
-                            .map { it.key to it.value }
-                    }
-                    for ((key, view) in retained) {
-                        if (key in currentKeys) {
-                            synchronized(retainedPillViews) { retainedPillViews.remove(key) }
-                            val currentView = boundPills.entries.firstOrNull { it.value == key }?.key
-                            if (currentView !== view) {
-                                (view.parent as? ViewGroup)?.removeView(view)
-                                boundPills.remove(view)
-                                applyPillStyle(view, false)
-                            }
-                        } else if (isRemoved(key)) {
-                            if (view.parent !== flexbox) {
-                                (view.parent as? ViewGroup)?.removeView(view)
-                                runCatching { flexbox.addView(view) }.onFailure {
-                                    XposedBridge.log("Reaction Logs: could not retain removed pill: $it")
-                                }
-                            }
-                            boundPills[view] = key
-                            setPillCountZero(view)
-                            applyPillStyle(view, true)
-                        } else {
-                            synchronized(retainedPillViews) { retainedPillViews.remove(key) }
-                            (view.parent as? ViewGroup)?.removeView(view)
-                            boundPills.remove(view)
-                            applyPillStyle(view, false)
-                        }
-                    }
+                    val removed = isRemoved(key)
+                    applyPillStyle(pillView, removed, pill.count == 0)
                 }
             },
         )
+        XposedBridge.log("Reaction Logs: native reaction-pill model hooks installed")
     }
+
+    private fun findReactionTemplate(
+        channelId: String?,
+        messageId: String,
+        emojiKey: String,
+        reactionType: Int,
+    ): Any? = synchronized(reactionTemplates) {
+        val exact = channelId?.let {
+            reactionTemplates[modelKey(it, messageId, emojiKey, reactionType)]
+        }
+        exact ?: reactionTemplates.entries.firstOrNull { (key, _) ->
+            key.messageId == messageId &&
+                key.emojiKey == emojiKey &&
+                key.reactionType == reactionType &&
+                (channelId == null || key.channelId == channelId)
+        }?.value
+    }
+
+    private fun createZeroCountReaction(
+        entry: RemovalEntry,
+        template: Any?,
+        reactionInterface: Class<*>,
+        emojiClass: Class<*>,
+    ): Any? {
+        val emoji = template?.let { readMember(it, "emoji") }
+            ?: createEmojiModel(entry, emojiClass)
+            ?: run {
+                XposedBridge.log("Reaction Logs: cannot reconstruct emoji metadata for a removed reaction pill")
+                return null
+            }
+
+        val proxy = Proxy.newProxyInstance(
+            reactionInterface.classLoader ?: javaClass.classLoader,
+            arrayOf(reactionInterface),
+        ) { instance, method, args ->
+            when (method.name) {
+                "getCount", "getBurstCount" -> 0
+                "getEmoji" -> emoji
+                "isBurstReaction" -> entry.reactionType == 1
+                "isMe", "isMeBurst", "getIsMe", "getIsMeBurst" -> false
+                "getThemedBurstColors" -> template?.let { readMember(it, "themedBurstColors") }
+                "getItemId" -> runCatching {
+                    val defaults = reactionInterface.classLoader.loadClass(
+                        "${reactionInterface.name}\$DefaultImpls",
+                    )
+                    defaults.methods.first {
+                        it.name == "getItemId" && it.parameterCount == 1
+                    }.invoke(null, instance)
+                }.getOrNull() ?: 0L
+                "toString" -> "ReactionLogsZeroCountReaction(${entry.emojiKey}, ${entry.reactionType})"
+                "hashCode" -> System.identityHashCode(instance)
+                "equals" -> instance === args?.firstOrNull()
+                else -> if (template != null) {
+                    runCatching { method.invoke(template, *(args ?: emptyArray())) }.getOrNull()
+                } else {
+                    null
+                }
+            }
+        }
+        return proxy
+    }
+
+    private fun createEmojiModel(entry: RemovalEntry, emojiClass: Class<*>): Any? = runCatching {
+        val constructor = emojiClass.declaredConstructors.firstOrNull { candidate ->
+            val types = candidate.parameterTypes
+            types.size == 5 &&
+                types[0] == String::class.java &&
+                types[1] == String::class.java &&
+                types[2] == String::class.java &&
+                types[3] == String::class.java &&
+                types[4] == java.lang.Boolean::class.java
+        } ?: return@runCatching null
+        val emojiId = entry.emojiId
+            ?: entry.emojiKey.takeIf { it.startsWith("custom:") }?.removePrefix("custom:")
+        val emojiName = entry.emojiName
+            ?: entry.emojiKey.takeIf { it.startsWith("unicode:") }?.removePrefix("unicode:")
+        val displayName = entry.emojiDisplayName ?: emojiName ?: "emoji"
+        constructor.isAccessible = true
+        constructor.newInstance(
+            emojiName,
+            entry.emojiSrc ?: "",
+            displayName,
+            emojiId,
+            entry.emojiAnimated,
+        )
+    }.onFailure {
+        XposedBridge.log("Reaction Logs: could not rebuild Discord emoji model: $it")
+    }.getOrNull()
+
+    private fun boundPillViews(): List<LinearLayout> = boundPills.keys.toList()
+        .plus(syntheticPillViews.keys.toList())
+        .distinct()
 
     /**
      * When a reaction's user list is open, mark the row belonging to a user whose
@@ -893,31 +1086,78 @@ internal class ReactionLogHooks(
         return null
     }
 
-    private fun applyPillStyle(view: LinearLayout, removed: Boolean) {
-        val count = countText(view)
-        val original = originalPillStyles.getOrPut(view) {
-            OriginalPillStyle(view.backgroundTintList, count?.textColors)
+    private fun applyPillStyle(view: LinearLayout, removed: Boolean, zeroCount: Boolean) {
+        if (!removed) {
+            restorePillStyle(view)
+            return
         }
 
-        if (removed) {
-            view.backgroundTintList = ColorStateList.valueOf(REMOVED_TINT)
-            count?.setTextColor(REMOVED_RED)
-        } else {
-            view.backgroundTintList = original.backgroundTint
-            original.countColors?.let { count?.setTextColor(it) }
+        val original = originalPillStyles.getOrPut(view) {
+            val count = countText(view)
+            val switcher = countSwitcher(view)
+            val labels = LinkedHashMap<Int, Int>()
+            visitViews(view) { child ->
+                if (isReactionLabel(child) && child.id != View.NO_ID) {
+                    labels[child.id] = child.visibility
+                }
+            }
+            OriginalPillStyle(
+                backgroundTint = view.backgroundTintList,
+                countColors = count?.textColors,
+                countText = count?.text,
+                countVisibility = count?.visibility,
+                countSwitcherVisibility = switcher?.visibility,
+                labelVisibilities = labels,
+            )
+        }
+
+        view.backgroundTintList = ColorStateList.valueOf(REMOVED_TINT)
+        countText(view)?.setTextColor(REMOVED_RED)
+        if (zeroCount) setPillCountZero(view)
+    }
+
+    private fun restorePillStyle(view: LinearLayout) {
+        val original = originalPillStyles.remove(view) ?: return
+        view.backgroundTintList = original.backgroundTint
+        val count = countText(view)
+        original.countColors?.let { count?.setTextColor(it) }
+        original.countText?.let { count?.text = it }
+        original.countVisibility?.let { count?.visibility = it }
+        original.countSwitcherVisibility?.let { countSwitcher(view)?.visibility = it }
+        if (original.labelVisibilities.isNotEmpty()) {
+            visitViews(view) { child ->
+                if (child.id != View.NO_ID && original.labelVisibilities.containsKey(child.id)) {
+                    child.visibility = original.labelVisibilities.getValue(child.id)
+                }
+            }
         }
     }
 
-    private fun countText(view: ViewGroup): TextView? {
+    private fun countSwitcher(view: ViewGroup): TextSwitcher? {
         for (index in 0 until view.childCount) {
             val child = view.getChildAt(index)
-            if (child is TextSwitcher) return child.currentView as? TextView
+            if (child is TextSwitcher) return child
         }
         return null
     }
 
+    private fun countText(view: ViewGroup): TextView? = countSwitcher(view)?.currentView as? TextView
+
+    private fun isReactionLabel(view: View): Boolean {
+        if (view.id == View.NO_ID) return false
+        val name = runCatching { view.resources.getResourceEntryName(view.id) }.getOrNull() ?: return false
+        return name.contains("reaction_label", ignoreCase = true)
+    }
+
     private fun setPillCountZero(view: LinearLayout) {
-        countText(view)?.text = "0"
+        val switcher = countSwitcher(view) ?: return
+        switcher.visibility = View.VISIBLE
+        val count = switcher.currentView as? TextView
+        count?.visibility = View.VISIBLE
+        count?.text = "0"
+        visitViews(view) { child ->
+            if (isReactionLabel(child)) child.visibility = View.GONE
+        }
     }
 
     private fun pills(
@@ -925,16 +1165,22 @@ internal class ReactionLogHooks(
         getCount: Method,
         getBurstCount: Method,
         getEmoji: Method,
+        isBurstReaction: Method,
     ): List<Pill> = reactions.flatMap { reaction ->
         if (reaction == null) return@flatMap emptyList()
         val count = getCount.invoke(reaction) as Int
         val burstCount = getBurstCount.invoke(reaction) as Int
         val emoji = getEmoji.invoke(reaction)
+        val modelIsBurst = runCatching { isBurstReaction.invoke(reaction) as Boolean }
+            .getOrDefault(burstCount > 0)
         when {
-            burstCount > 0 && count > 0 -> listOf(Pill(emoji, true, burstCount), Pill(emoji, false, count))
-            burstCount > 0 -> listOf(Pill(emoji, true, burstCount))
-            count > 0 -> listOf(Pill(emoji, false, count))
-            else -> emptyList()
+            burstCount > 0 && count > 0 -> listOf(
+                Pill(reaction, emoji, true, burstCount),
+                Pill(reaction, emoji, false, count),
+            )
+            burstCount > 0 -> listOf(Pill(reaction, emoji, true, burstCount))
+            count > 0 -> listOf(Pill(reaction, emoji, false, count))
+            else -> listOf(Pill(reaction, emoji, modelIsBurst, 0))
         }
     }
 
@@ -972,6 +1218,9 @@ internal class ReactionLogHooks(
 
 private fun reactionKey(messageId: String, emojiKey: String, type: Int) =
     "$messageId|$emojiKey|$type"
+
+private fun modelKey(channelId: String, messageId: String, emojiKey: String, type: Int) =
+    ReactionModelKey(channelId, messageId, emojiKey, type)
 
 private fun userRowKey(guildId: String?, channelId: String, messageId: String, emojiKey: String, type: Int, userId: String) =
     listOf(guildId.orEmpty(), channelId, messageId, emojiKey, type.toString(), userId).joinToString("\u0000")
