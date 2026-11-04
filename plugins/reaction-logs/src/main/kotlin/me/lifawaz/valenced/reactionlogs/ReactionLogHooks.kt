@@ -691,7 +691,7 @@ internal class ReactionLogHooks(
                 types[1] == String::class.java &&
                 types[2] == String::class.java &&
                 types[3] == String::class.java &&
-                types[4] == java.lang.Boolean::class.java
+                (types[4] == java.lang.Boolean::class.java || types[4] == Boolean::class.javaPrimitiveType)
         } ?: run {
             XposedBridge.log(
                 "Reaction Logs: no compatible MessageReactionEmoji constructor; candidates=" +
@@ -714,7 +714,7 @@ internal class ReactionLogHooks(
             emojiSrc,
             displayName,
             emojiId,
-            entry.emojiAnimated,
+            entry.emojiAnimated ?: false,
         )
     }.onFailure {
         XposedBridge.log("Reaction Logs: could not rebuild Discord emoji model: $it")
@@ -746,6 +746,17 @@ internal class ReactionLogHooks(
         if (id != null) return id
         val name = readMember(emoji, "name")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
         return name?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+    }
+
+    private fun emojiMatchesApiKey(emoji: Any, targetApiKey: String): Boolean {
+        val id = readMember(emoji, "id")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        val name = readMember(emoji, "name")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+            ?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+        return targetApiKey == id ||
+            targetApiKey == name ||
+            targetApiKey == "custom:$id" ||
+            targetApiKey == "unicode:$name" ||
+            (id != null && targetApiKey.endsWith(":$id"))
     }
 
     private fun currentRemovedUsersForReaction(
@@ -796,7 +807,7 @@ internal class ReactionLogHooks(
         return items.any { item ->
             val reaction = readMember(item, "reaction") ?: return@any false
             val emoji = readMember(reaction, "emoji") ?: return@any false
-            if (emojiApiKey(emoji) != targetApiKey) return@any false
+            if (!emojiMatchesApiKey(emoji, targetApiKey)) return@any false
             val count = (readMember(reaction, "count") as? Number)?.toInt() ?: 0
             val burstCount = (readMember(reaction, "burstCount") as? Number)?.toInt() ?: 0
             count > 0 || burstCount > 0
@@ -986,6 +997,7 @@ internal class ReactionLogHooks(
             if (readMember(widget, "modelProvider") !== param.thisObject) return@hook
             val target = param.args.getOrNull(0) as? String ?: return@hook
             popupTargetApiKey = target
+            popupTargetReactionType = null
 
             if (hasPositiveReactionTab(lastPopupModel, target)) return@hook
             if (!hasRemovalForTarget(widget, target, dexFinder.classLoader)) return@hook
@@ -1089,9 +1101,7 @@ internal class ReactionLogHooks(
             reactionItems.firstOrNull { item ->
                 val reaction = readMember(item, "reaction") ?: return@firstOrNull false
                 val itemEmoji = readMember(reaction, "emoji") ?: return@firstOrNull false
-                emojiApiKey(itemEmoji)?.let { apiKey ->
-                    apiKey == target || target.endsWith(":$apiKey")
-                } == true
+                emojiMatchesApiKey(itemEmoji, target)
             }
         } ?: return clearPopupSelection(model)
         val selectedReaction = readMember(selectedItem, "reaction") ?: return clearPopupSelection(model)
