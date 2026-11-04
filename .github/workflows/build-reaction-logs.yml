@@ -28,6 +28,10 @@ permissions:
   contents: write
   packages: read
 
+concurrency:
+  group: reaction-logs-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
