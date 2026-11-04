@@ -409,6 +409,16 @@ describe('Reaction Logs event state', () => {
         expect(current.removalHistory[0].reactionType).toBe(0)
     })
 
+    test('false burst flag does not override an explicit burst reaction type', () => {
+        const current = applyReactionRemove(state(), base({
+            type: 'MESSAGE_REACTION_REMOVE',
+            reaction_type: 1,
+            burst: false,
+        }), 53)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.removalHistory[0].reactionType).toBe(1)
+    })
+
     test('normal and burst Flux payload fields remain isolated for the same user and emoji', () => {
         let current = applyReactionAdd(state(), base({ reaction_type: 0 }), 10)
         current = applyReactionAdd(current, base({ reaction_type: 1 }), 11)
