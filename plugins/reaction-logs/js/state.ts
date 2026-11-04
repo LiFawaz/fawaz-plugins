@@ -243,6 +243,7 @@ export function hydrateState(
         storage: normalizeStorage(cache, now),
         // Discord's current reactor store is authoritative after a plugin reload.
         activeReactions: [],
+        sessionStartedAt: now,
     }
 }
 
@@ -253,7 +254,7 @@ export function applyReactionAdd(
 ): ReactionRuntimeState {
     const storage = normalizeStorage(input.storage, now)
     const identity = reactionIdentity(payload)
-    if (!identity) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions) }
+    if (!identity) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions), sessionStartedAt: input.sessionStartedAt }
 
     const active = new Map(input.activeReactions.map(item => [item.identityKey, item]))
     if (!active.has(identity.identityKey)) {
@@ -264,6 +265,7 @@ export function applyReactionAdd(
     return {
         storage,
         activeReactions: normalizeActiveReactions([...active.values()]),
+        sessionStartedAt: input.sessionStartedAt,
     }
 }
 
@@ -325,6 +327,7 @@ export function applyRemoveAll(
         activeReactions: input.activeReactions.filter(
             item => item.channelId !== channelId || item.messageId !== messageId,
         ),
+        sessionStartedAt: input.sessionStartedAt,
     }
 }
 
@@ -348,6 +351,7 @@ export function applyRemoveEmoji(
                 item.messageId !== messageId ||
                 item.emojiKey !== emoji.key,
         ),
+        sessionStartedAt: input.sessionStartedAt,
     }
 }
 
@@ -359,7 +363,7 @@ export function applyMessageDelete(
     const messageId = nonEmpty(payload.id) ?? eventString(payload, 'messageId', 'message_id')
     const channelId = eventString(payload, 'channelId', 'channel_id')
     const storage = normalizeStorage(input.storage, now)
-    if (!messageId) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions) }
+    if (!messageId) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions), sessionStartedAt: input.sessionStartedAt }
 
     const removalHistory = storage.removalHistory.filter(
         item => item.messageId !== messageId ||
@@ -380,6 +384,7 @@ export function applyMessageDelete(
     return {
         storage: { schemaVersion: 2, removalHistory, epochs },
         activeReactions: normalizeActiveReactions(activeReactions),
+        sessionStartedAt: input.sessionStartedAt,
     }
 }
 
@@ -456,5 +461,6 @@ export function buildNativeSnapshot(state: ReactionRuntimeState, now = Date.now(
         })),
         removalHistory: storage.removalHistory,
         activeReactions,
+        sessionStartedAt: state.sessionStartedAt,
     }
 }
