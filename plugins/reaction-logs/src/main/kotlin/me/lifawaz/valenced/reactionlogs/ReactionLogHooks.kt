@@ -652,12 +652,26 @@ internal class ReactionLogHooks(
                 "equals" -> instance === args?.firstOrNull()
                 else -> if (template != null) {
                     runCatching { method.invoke(template, *(args ?: emptyArray())) }.getOrNull()
+                        ?: defaultValue(method.returnType)
                 } else {
-                    null
+                    defaultValue(method.returnType)
                 }
             }
         }
         return proxy
+    }
+
+    private fun defaultValue(type: Class<*>): Any? = when (type) {
+        java.lang.Boolean.TYPE -> false
+        java.lang.Byte.TYPE -> 0.toByte()
+        java.lang.Character.TYPE -> '\\u0000'
+        java.lang.Short.TYPE -> 0.toShort()
+        java.lang.Integer.TYPE -> 0
+        java.lang.Long.TYPE -> 0L
+        java.lang.Float.TYPE -> 0f
+        java.lang.Double.TYPE -> 0.0
+        java.lang.Void.TYPE -> null
+        else -> null
     }
 
     private fun createEmojiModel(entry: RemovalEntry, emojiClass: Class<*>): Any? = runCatching {
@@ -669,16 +683,26 @@ internal class ReactionLogHooks(
                 types[2] == String::class.java &&
                 types[3] == String::class.java &&
                 types[4] == java.lang.Boolean::class.java
-        } ?: return@runCatching null
+        } ?: run {
+            XposedBridge.log(
+                "Reaction Logs: no compatible MessageReactionEmoji constructor; candidates=" +
+                    emojiClass.declaredConstructors.joinToString { it.toGenericString() },
+            )
+            return@runCatching null
+        }
         val emojiId = entry.emojiId
             ?: entry.emojiKey.takeIf { it.startsWith("custom:") }?.removePrefix("custom:")
         val emojiName = entry.emojiName
             ?: entry.emojiKey.takeIf { it.startsWith("unicode:") }?.removePrefix("unicode:")
         val displayName = entry.emojiDisplayName ?: emojiName ?: "emoji"
+        val emojiSrc = entry.emojiSrc ?: emojiId?.let {
+            val extension = if (entry.emojiAnimated == true) "gif" else "png"
+            "https://cdn.discordapp.com/emojis/$it.$extension?size=48"
+        } ?: ""
         constructor.isAccessible = true
         constructor.newInstance(
             emojiName,
-            entry.emojiSrc ?: "",
+            emojiSrc,
             displayName,
             emojiId,
             entry.emojiAnimated,
