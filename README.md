@@ -20,20 +20,16 @@ Then open the plugin browser and install the plugins you want.
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.5 | Downloads voice audio, lets you choose app Documents or Cache, and copies the exact save path |
+| Voice Message Downloader | 1.0.6 | Saves voice messages through Android Files |
 
 **Hidden Channels is intentionally excluded.**
 
-## Voice Message Downloader storage
+## Voice Message Downloader
 
-Open its **Configure** section. Choose **Documents** for persistent app storage or **Cache** for temporary app storage, then choose a folder name. Nested folders are supported, for example `Audio/Discord`.
+Every download opens Android Files. Choose **Create new file** to select a folder and filename, or **Choose existing file** to replace an audio file after a confirmation prompt. Configure also lets you save an optional default folder so the picker starts there next time.
 
-The Configure screen now has **Show save location**, which copies the exact folder path (or the last saved file path) to the clipboard. Downloads are stored in Valenced's private Documents or Cache directory, not the public Android Downloads folder. Android's normal Files app may not be able to browse that private directory, and the current Valenced API does not expose a public folder picker. The plugin source is plain JavaScript under `plugins/voice-message-downloader/js/index.js`.
+The plugin uses Android's Storage Access Framework and a native Kotlin component. It does not save voice messages into Valenced's private Documents or Cache folders.
 
 ## Source repositories
 
 [VC Follow](https://github.com/LiFawaz/valenced-vc-follow) · [Fake-deaf](https://github.com/LiFawaz/valenced-fake-deaf) · [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere) · [Reaction Logs](https://github.com/LiFawaz/reaction-logs)
-
-## Repository checks
-
-GitHub Actions validates locally hosted package sizes, SHA-256 hashes, ZIP integrity, and manifest ID/version consistency. It also checks the index, JavaScript syntax, and the Voice Message Downloader's Configure UI and save flow.

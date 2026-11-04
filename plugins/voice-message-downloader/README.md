@@ -2,14 +2,19 @@
 
 Adds **Download Voice Message** to the long-press action sheet for native Discord voice messages.
 
-## Configure
+## Saving a voice message
 
-Open the plugin's Configure section. Choose **Documents** to keep files in the app's persistent documents storage or **Cache** for temporary storage. Enter a folder name such as `voice-messages` or a nested path such as `Audio/Discord`.
+Every download opens Android's system file picker. The first prompt lets you choose one of two actions:
 
-## Saving behaviour
+- **Create new file** opens Android's Save As picker. Choose a folder and filename. You can create a folder in the picker when the selected document provider supports it. If the same name already exists, Android creates a numbered copy instead of overwriting it.
+- **Choose existing file** opens the audio file picker. Select an existing audio file; the plugin checks that the provider supports writing and asks you to confirm before replacing its contents.
 
-The plugin downloads the attachment from Discord's CDN with `fetch()`, converts the returned bytes to base64, and writes the file using Valenced's `FileModule.writeFile()` API. It does not use `FileModule.readAsset()` on a remote URL, which failed on some Android builds with `Resource id #0x0`.
+## Remember a default folder
 
-Valenced exposes only app Documents and Cache through its current file API. This plugin cannot write directly to the public Android Downloads folder or invoke Android's folder picker. Files are saved under the folder selected in Configure, inside the selected app storage location.
+In Configure, choose **Choose or change folder** to select an optional default folder. Android remembers the write permission, and later file pickers start in that folder. The first download still lets you choose a different folder or an existing file.
 
-The source is plain JavaScript. A smoke test covers the plugin loader wrapper, Configure callbacks, voice-message menu injection, CDN fetch, byte conversion, and selected storage path. Live Android behavior still needs testing on the user's installed Valenced build.
+## Storage and safety
+
+The plugin uses Android's Storage Access Framework through a native Kotlin component. Audio downloads are first checked and staged in temporary app cache, then written to the selected document. Downloads are limited to 50 MB and accepted only from Discord's HTTPS attachment CDN hosts.
+
+If the default folder is deleted or Android revokes its permission, choose it again in Configure. Existing-file replacement requires a document provider that advertises write support.
