@@ -1,0 +1,138 @@
+name: Build Reaction Logs
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "plugins/reaction-logs/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build-reaction-logs.yml"
+  pull_request:
+    paths:
+      - "plugins/reaction-logs/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build-reaction-logs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Run reaction state regression tests
+        run: bun test plugins/reaction-logs/tests
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.1"
+
+      - name: Build and package Reaction Logs
+        run: gradle --no-daemon packageReactionLogs
+        env:
+          GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN || github.token }}
+
+      - name: Type-check Reaction Logs TypeScript
+        run: bunx tsc --noEmit -p plugins/reaction-logs/tsconfig.json
+
+      - name: Validate installable ZIP and DEX payload
+        run: |
+          python - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+
+          manifest = json.loads(Path("plugins/reaction-logs/manifest.json").read_text())
+          archive = Path(f"build/dist/{manifest['id']}@{manifest['version']}.zip")
+          assert archive.is_file(), f"Missing package: {archive}"
+          with zipfile.ZipFile(archive) as package:
+              assert package.testzip() is None, "ZIP integrity check failed"
+              names = set(package.namelist())
+              assert {"manifest.json", "index.js", "plugin.jar"} <= names, names
+              assert not any(name.startswith("/") or name.startswith("../") for name in names)
+              packaged_manifest = json.loads(package.read("manifest.json"))
+              assert packaged_manifest["id"] == manifest["id"]
+              assert packaged_manifest["version"] == manifest["version"]
+              native = zipfile.ZipFile(package.open("plugin.jar"))
+              assert "classes.dex" in native.namelist(), native.namelist()
+          print(f"PASS: {archive} contains manifest.json, index.js and a DEXed plugin.jar.")
+          PY
+
+      - name: Publish package to this feature branch and update index
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/fix/reaction-logs-persistent-popup'
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import shutil
+          from pathlib import Path
+
+          plugin_id = "lifawaz.reaction-logs"
+          manifest_path = Path("plugins/reaction-logs/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          version = manifest["version"]
+          archive = Path(f"build/dist/{plugin_id}@{version}.zip")
+          destination = Path("pool") / archive.name
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(archive, destination)
+          data = destination.read_bytes()
+
+          index_path = Path("index.json")
+          index = json.loads(index_path.read_text(encoding="utf-8"))
+          plugin = index["plugins"][plugin_id]
+          plugin["description"] = manifest["description"]
+          plugin.setdefault("channels", {})["latest"] = version
+          plugin.setdefault("versions", {})[version] = {
+              "url": f"https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/{plugin_id}%40{version}.zip",
+              "sha256": hashlib.sha256(data).hexdigest(),
+              "size": len(data),
+              "dependencies": manifest.get("dependencies", {}),
+          }
+          index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          print(f"Prepared {destination} ({len(data)} bytes)")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pool/lifawaz.reaction-logs@1.4.0.zip index.json
+          git diff --cached --quiet || git commit -m "Publish Reaction Logs 1.4.0 to feature branch"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Validate branch index and published package
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/fix/reaction-logs-persistent-popup'
+        run: python scripts/validate_repo.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reaction-logs-1.4.0-install-zip
+          path: build/dist/lifawaz.reaction-logs@1.4.0.zip
+          if-no-files-found: error
+          retention-days: 14
