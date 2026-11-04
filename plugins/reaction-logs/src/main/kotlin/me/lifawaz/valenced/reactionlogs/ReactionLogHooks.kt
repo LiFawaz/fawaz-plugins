@@ -234,10 +234,18 @@ internal class ReactionLogHooks(
         synchronized(removalHistory) { removalHistory.clear() }
         synchronized(activeReactions) { activeReactions.clear() }
         synchronized(popupRemovedRowKeys) { popupRemovedRowKeys.clear() }
-        synchronized(retainedPillViews) { retainedPillViews.clear() }
+        val retained = synchronized(retainedPillViews) {
+            retainedPillViews.values.toList().also { retainedPillViews.clear() }
+        }
         mainHandler.post {
+            retained.forEach { view ->
+                (view.parent as? ViewGroup)?.removeView(view)
+                boundPills.remove(view)
+                applyPillStyle(view, false, zeroCount = false)
+            }
             for (pill in boundPills.keys.toList()) applyPillStyle(pill, false, zeroCount = false)
             for (row in userRows.keys.toList()) applyUserRowStyle(row, false)
+            refreshPopupModel()
         }
     }
 
