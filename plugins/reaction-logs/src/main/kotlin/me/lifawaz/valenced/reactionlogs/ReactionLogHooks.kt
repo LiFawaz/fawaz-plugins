@@ -352,13 +352,17 @@ internal class ReactionLogHooks(
             matcher { usingEqStrings("messageId", "accessoryDescription") }
         } ?: error("MessageAccessory not found")
 
-        val accessoryMessageId = dexFinder.findMethod {
-            matcher {
-                declaredClass(accessoryClass.name)
-                paramCount(0)
-                returnType(String::class.java)
-            }
-        } ?: error("MessageAccessory.getMessageId not found")
+        // MessageAccessory also exposes accessoryDescription as a String.
+        // Match the mangled Kotlin value-class getter by name, not just its
+        // return type, or we can accidentally bind the description as messageId.
+        val accessoryMessageId = generateSequence(accessoryClass) { it.superclass }
+            .flatMap { it.declaredMethods.asSequence() }
+            .firstOrNull {
+                it.name.startsWith("getMessageId") &&
+                    it.parameterCount == 0 &&
+                    it.returnType == String::class.java
+            }?.apply { isAccessible = true }
+            ?: error("MessageAccessory.getMessageId(value-class getter) not found")
 
         val emojiClass = dexFinder.findClass {
             matcher { addUsingString("MessageReactionEmoji(name=") }
