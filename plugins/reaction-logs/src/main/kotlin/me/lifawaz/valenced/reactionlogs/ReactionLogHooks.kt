@@ -840,7 +840,14 @@ internal class ReactionLogHooks(
         val emoji = templateEmoji ?: createEmojiModel(entry, emojiType)
             ?: return@runCatching null
         constructor.isAccessible = true
-        constructor.newInstance(0, false, false, emoji, 0, null)
+        constructor.newInstance(
+            0,
+            false,
+            false,
+            emoji,
+            0,
+            defaultValue(constructor.parameterTypes[5]),
+        )
     }.onFailure {
         XposedBridge.log("Reaction Logs: could not build zero-count MessageReaction: $it")
     }.getOrNull()
@@ -951,7 +958,7 @@ internal class ReactionLogHooks(
         } ?: return null
         return runCatching {
             constructor.isAccessible = true
-            constructor.newInstance(items, emptyList<Any>())
+            constructor.newInstance(items, ArrayList<Any>())
         }.onFailure {
             XposedBridge.log("Reaction Logs: could not create fallback ManageReactionsModel: $it")
         }.getOrNull()
