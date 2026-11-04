@@ -15,7 +15,17 @@ import {
 import { DefaultStorage } from './shared'
 import type { ReactionPayload, ReactionStorage } from './shared'
 
-type ReactionEventName = 'MESSAGE_REACTION_ADD' | 'MESSAGE_REACTION_REMOVE'
+type FluxEventName =
+    | 'MESSAGE_REACTION_ADD'
+    | 'MESSAGE_REACTION_REMOVE'
+    | 'MESSAGE_REACTION_REMOVE_ALL'
+    | 'MESSAGE_REACTION_REMOVE_EMOJI'
+    | 'MESSAGE_DELETE'
+    | 'MESSAGE_DELETE_BULK'
+    | 'USER_UPDATE'
+    | 'GUILD_MEMBER_UPDATE'
+
+type IndividualReactionEvent = 'MESSAGE_REACTION_ADD' | 'MESSAGE_REACTION_REMOVE'
 
 function payloadShape(payload: ReactionPayload) {
     const emoji = payload.emoji
@@ -31,7 +41,7 @@ function payloadShape(payload: ReactionPayload) {
         reactionType: reactionType ?? (payload.burst === true ? 'burst' : payload.burst === false ? 'normal' : null),
         burst: payload.burst ?? null,
         guild: payload.guildId != null || payload.guild_id != null,
-        dispatchType: (payload as ReactionPayload & { type?: unknown }).type ?? null,
+        dispatchType: payload.type ?? null,
         keys: Object.keys(payload as object),
     }
 }
@@ -46,6 +56,14 @@ function missingIdentityFields(payload: ReactionPayload): string[] {
     return missing
 }
 
+function copyFluxPayload(payload: ReactionPayload): ReactionPayload {
+    return {
+        ...payload,
+        emoji: payload.emoji ? { ...payload.emoji } : payload.emoji,
+        ids: Array.isArray(payload.ids) ? [...payload.ids] : payload.ids,
+    }
+}
+
 export default plugin<{ jsonStorage: ReactionStorage }>({
     jsonStorage: {
         load: true,
@@ -53,26 +71,17 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
     },
 
     async start({ cleanup, plugin, jsonStorage }) {
-        // Await the storage read explicitly. A plugin start can happen before the
-        // async JSON document has populated cache, even with load:true configured.
-        let stored: ReactionStorage | null | undefined
-        try {
-            stored = await jsonStorage.get()
-        } catch (error) {
-            plugin.reportError('Could not load reaction history; using the last in-memory cache: ' + String(error))
-            console.error('[Reaction Logs] storage read failed', error)
-            stored = jsonStorage.cache
-        }
-        let state = normalizeReactionStorage(stored ?? jsonStorage.cache, Date.now())
+        let state = normalizeReactionStorage(jsonStorage.cache ?? DefaultStorage, Date.now())
+        let storageReady = false
+        let stopped = false
         let eventSequence = 0
+        const pendingEvents: Array<{ event: FluxEventName; payload: ReactionPayload }> = []
         const persistence = createReactionPersistenceQueue(jsonStorage, (error, sequence) => {
             plugin.reportError('Could not verify persisted reaction history (write ' + sequence + '): ' + String(error))
             console.error('[Reaction Logs] storage write/read-back verification failed', { sequence, error })
         })
 
         const persistState = () => {
-            // Capture this exact state now; the queue snapshots it again before
-            // the first await so rapid Flux events cannot overwrite each other.
             const snapshot = normalizeReactionStorage(state, Date.now())
             void persistence.enqueue(snapshot).then(() => {
                 console.debug('[Reaction Logs] storage write verified', {
@@ -99,16 +108,19 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             }
         }
 
-        const update = (next: ReactionStorage) => {
+        const update = (next: ReactionStorage, persist = true) => {
             state = next
-            persistState()
-            syncNative()
+            if (persist) {
+                persistState()
+                syncNative()
+            }
         }
 
         const handleIndividualReaction = (
-            eventName: ReactionEventName,
+            eventName: IndividualReactionEvent,
             payload: ReactionPayload,
             transition: (current: ReactionStorage, event: ReactionPayload) => ReactionStorage,
+            persist: boolean,
         ) => {
             const sequence = ++eventSequence
             const identity = reactionIdentityFromPayload(payload)
@@ -118,6 +130,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             console.debug('[Reaction Logs] Flux reaction event received', {
                 event: eventName,
                 sequence,
+                deferredUntilStorageLoad: !storageReady,
                 identityValid: identity != null,
                 missingIdentityFields: identity ? [] : missingIdentityFields(payload),
                 fields: payloadShape(payload),
@@ -125,74 +138,66 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
                 removalRecorded: recorded,
                 removalCount: next.removalHistory.length,
             })
-            update(next)
-            // Valenced's Flux patch contract requires the original payload to be
-            // returned for Discord's dispatcher to continue processing the event.
+            update(next, persist)
+        }
+
+        const processEvent = (event: FluxEventName, payload: ReactionPayload, persist = true) => {
+            switch (event) {
+                case 'MESSAGE_REACTION_ADD':
+                    handleIndividualReaction(event, payload, applyReactionAdd, persist)
+                    break
+                case 'MESSAGE_REACTION_REMOVE':
+                    handleIndividualReaction(event, payload, applyReactionRemove, persist)
+                    break
+                case 'MESSAGE_REACTION_REMOVE_ALL':
+                    update(applyRemoveAll(state, payload), persist)
+                    break
+                case 'MESSAGE_REACTION_REMOVE_EMOJI':
+                    update(applyRemoveEmoji(state, payload), persist)
+                    break
+                case 'MESSAGE_DELETE':
+                    update(applyMessageDelete(state, payload), persist)
+                    break
+                case 'MESSAGE_DELETE_BULK':
+                    update(applyBulkMessageDelete(state, payload), persist)
+                    break
+                case 'USER_UPDATE':
+                case 'GUILD_MEMBER_UPDATE':
+                    if (persist && state.removalHistory.length > 0) syncNative()
+                    break
+            }
+        }
+
+        const dispatch = (event: FluxEventName, payload: ReactionPayload) => {
+            if (stopped) return payload
+            if (!storageReady) {
+                pendingEvents.push({ event, payload: copyFluxPayload(payload) })
+                console.debug('[Reaction Logs] buffered Flux event while loading persistent history', {
+                    event,
+                    buffered: pendingEvents.length,
+                    fields: payloadShape(payload),
+                })
+                return payload
+            }
+            processEvent(event, payload)
+            // Returning the original payload is required for Flux to continue
+            // dispatching the action to Discord's own stores.
             return payload
         }
 
+        // Install listeners before the first await. Otherwise a reaction removed
+        // while the storage file is loading can be missed and never persisted.
         cleanup(
-            onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_REACTION_ADD',
-                payload => handleIndividualReaction('MESSAGE_REACTION_ADD', payload, applyReactionAdd),
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_REACTION_REMOVE',
-                payload => handleIndividualReaction('MESSAGE_REACTION_REMOVE', payload, applyReactionRemove),
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_REACTION_REMOVE_ALL',
-                payload => {
-                    update(applyRemoveAll(state, payload))
-                    return payload
-                },
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_REACTION_REMOVE_EMOJI',
-                payload => {
-                    update(applyRemoveEmoji(state, payload))
-                    return payload
-                },
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_DELETE',
-                payload => {
-                    update(applyMessageDelete(state, payload))
-                    return payload
-                },
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'USER_UPDATE',
-                payload => {
-                    if (state.removalHistory.length > 0) syncNative()
-                    return payload
-                },
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'GUILD_MEMBER_UPDATE',
-                payload => {
-                    if (state.removalHistory.length > 0) syncNative()
-                    return payload
-                },
-            ),
-
-            onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_DELETE_BULK',
-                payload => {
-                    update(applyBulkMessageDelete(state, payload))
-                    return payload
-                },
-            ),
-
+            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_ADD', payload => dispatch('MESSAGE_REACTION_ADD', payload)),
+            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_REMOVE', payload => dispatch('MESSAGE_REACTION_REMOVE', payload)),
+            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_REMOVE_ALL', payload => dispatch('MESSAGE_REACTION_REMOVE_ALL', payload)),
+            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_REMOVE_EMOJI', payload => dispatch('MESSAGE_REACTION_REMOVE_EMOJI', payload)),
+            onFluxEventDispatched<ReactionPayload>('MESSAGE_DELETE', payload => dispatch('MESSAGE_DELETE', payload)),
+            onFluxEventDispatched<ReactionPayload>('MESSAGE_DELETE_BULK', payload => dispatch('MESSAGE_DELETE_BULK', payload)),
+            onFluxEventDispatched<ReactionPayload>('USER_UPDATE', payload => dispatch('USER_UPDATE', payload)),
+            onFluxEventDispatched<ReactionPayload>('GUILD_MEMBER_UPDATE', payload => dispatch('GUILD_MEMBER_UPDATE', payload)),
             async () => {
-                // Drain queued JSON writes before native teardown. This clears only
-                // native in-memory view bindings, never the persistent history.
+                stopped = true
                 await persistence.drain()
                 try {
                     clearRemoved()
@@ -202,13 +207,29 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             },
         )
 
-        // Restore saved state (including emoji render data), prune expiry, and
-        // synchronize native hooks even when the popup has never been opened.
+        let stored: ReactionStorage | null | undefined
+        try {
+            stored = await jsonStorage.get()
+        } catch (error) {
+            plugin.reportError('Could not load reaction history; using the last in-memory cache: ' + String(error))
+            console.error('[Reaction Logs] storage read failed', error)
+            stored = jsonStorage.cache
+        }
+        if (stopped) return
+
+        state = normalizeReactionStorage(stored ?? jsonStorage.cache, Date.now())
+        storageReady = true
+        const replay = pendingEvents.splice(0)
+        for (const item of replay) processEvent(item.event, item.payload, false)
+
+        // Persist the loaded/migrated state plus every event received during load,
+        // then restore the Android hooks and UI state in one synchronization pass.
         persistState()
         syncNative()
         console.debug('[Reaction Logs] started', {
             removals: state.removalHistory.length,
             active: state.activeReactions.length,
+            replayedEvents: replay.length,
         })
     },
 })
