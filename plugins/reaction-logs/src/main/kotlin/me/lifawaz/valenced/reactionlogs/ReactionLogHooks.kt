@@ -729,6 +729,167 @@ internal class ReactionLogHooks(
      * When a reaction's user list is open, mark the row belonging to a user whose
      * reaction-removal event was recorded for that message.
      */
+    private fun readWidgetTargetEmoji(widget: Any): String? {
+        val arguments = readMember(widget, "argumentsOrDefault")
+            ?: readMember(widget, "arguments")
+            ?: return null
+        return runCatching {
+            arguments.javaClass.methods.firstOrNull {
+                it.name == "getString" &&
+                    it.parameterCount == 1 &&
+                    it.parameterTypes[0] == String::class.java
+            }?.invoke(arguments, EXTRA_EMOJI_KEY) as? String
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun emojiApiKey(emoji: Any): String? {
+        val id = readMember(emoji, "id")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        if (id != null) return id
+        val name = readMember(emoji, "name")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        return name?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+    }
+
+    private fun entryApiKey(entry: RemovalEntry): String? =
+        entry.emojiId ?: entry.emojiName
+            ?: entry.emojiKey.takeIf { it.startsWith("unicode:") }?.removePrefix("unicode:")
+
+    private fun hasPositiveReactionTab(model: Any?, targetApiKey: String): Boolean {
+        val items = readMember(model, "reactionItems") as? List<*> ?: return false
+        return items.any { item ->
+            val reaction = readMember(item, "reaction") ?: return@any false
+            val emoji = readMember(reaction, "emoji") ?: return@any false
+            if (emojiApiKey(emoji) != targetApiKey) return@any false
+            val count = (readMember(reaction, "count") as? Number)?.toInt() ?: 0
+            val burstCount = (readMember(reaction, "burstCount") as? Number)?.toInt() ?: 0
+            count > 0 || burstCount > 0
+        }
+    }
+
+    private fun createZeroCountMessageReaction(
+        entry: RemovalEntry,
+        template: Any?,
+        loader: ClassLoader,
+    ): Any? = runCatching {
+        val emoji = template?.let { readMember(it, "emoji") }
+            ?: createEmojiModel(
+                entry,
+                loader.loadClass("com.discord.chat.bridge.reaction.MessageReactionEmoji"),
+            )
+            ?: return@runCatching null
+
+        val modelClass = loader.loadClass(MESSAGE_REACTION_MODEL)
+        val constructor = modelClass.declaredConstructors.firstOrNull { candidate ->
+            val types = candidate.parameterTypes
+            types.size == 6 &&
+                types[0] == Int::class.javaPrimitiveType &&
+                types[1] == Boolean::class.javaPrimitiveType &&
+                types[2] == Boolean::class.javaPrimitiveType &&
+                types[3].isAssignableFrom(emoji.javaClass) &&
+                types[4] == Int::class.javaPrimitiveType
+        } ?: return@runCatching null
+        constructor.isAccessible = true
+        constructor.newInstance(0, false, false, emoji, 0, null)
+    }.onFailure {
+        XposedBridge.log("Reaction Logs: could not build zero-count MessageReaction: $it")
+    }.getOrNull()
+
+    private fun createReactionEmojiTabItem(loader: ClassLoader, reaction: Any, selected: Boolean): Any? =
+        runCatching {
+            val itemClass = loader.loadClass(MANAGE_REACTIONS_EMOJI_ITEM)
+            val constructor = itemClass.declaredConstructors.firstOrNull { candidate ->
+                val types = candidate.parameterTypes
+                types.size == 2 &&
+                    types[0].isAssignableFrom(reaction.javaClass) &&
+                    types[1] == Boolean::class.javaPrimitiveType
+            } ?: return@runCatching null
+            constructor.isAccessible = true
+            constructor.newInstance(reaction, selected)
+        }.onFailure {
+            XposedBridge.log("Reaction Logs: could not build original popup emoji tab: $it")
+        }.getOrNull()
+
+    private fun createReactionEmojiTabCopy(item: Any, reaction: Any, selected: Boolean): Any? =
+        runCatching {
+            val constructor = item.javaClass.declaredConstructors.firstOrNull { candidate ->
+                val types = candidate.parameterTypes
+                types.size == 2 &&
+                    types[0].isAssignableFrom(reaction.javaClass) &&
+                    types[1] == Boolean::class.javaPrimitiveType
+            } ?: return@runCatching null
+            constructor.isAccessible = true
+            constructor.newInstance(reaction, selected)
+        }.getOrNull()
+
+    /**
+     * Discord's provider emits null and dismisses its original Widget when the
+     * message has no live reactions. Rebuild only the popup's display model from
+     * retained metadata; this never touches StoreMessages or the server count.
+     */
+    private fun buildFallbackManageReactionsModel(
+        widget: Any,
+        targetApiKey: String?,
+        loader: ClassLoader,
+    ): Any? {
+        val provider = readMember(widget, "modelProvider") ?: return null
+        val channelId = snowflakeId(readMember(provider, "channelId")) ?: return null
+        val messageId = snowflakeId(readMember(provider, "messageId")) ?: return null
+        val channelLong = channelId.toLongOrNull() ?: return null
+        val guildId = resolveGuildId(loader, channelLong)
+
+        val history = synchronized(removalHistory) {
+            removalHistory.values.filter { entry ->
+                entry.messageId == messageId &&
+                    (entry.channelId.isBlank() || entry.channelId == channelId) &&
+                    (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId)
+            }
+        }
+        if (history.isEmpty()) return null
+
+        // Preserve any other live emoji tabs from the last original model, but
+        // discard its user list because it belongs to the previous selected tab.
+        val previousItems = (readMember(lastPopupModel, "reactionItems") as? List<*>)
+            ?.filterNotNull()
+            .orEmpty()
+        val items = ArrayList<Any>(previousItems.size + history.size)
+        items.addAll(previousItems)
+        val presentKeys = previousItems.mapNotNull { item ->
+            val reaction = readMember(item, "reaction") ?: return@mapNotNull null
+            val emoji = readMember(reaction, "emoji") ?: return@mapNotNull null
+            emojiApiKey(emoji)
+        }.toMutableSet()
+
+        val uniqueEntries = history.groupBy { it.emojiKey }
+            .values
+            .mapNotNull { group -> group.maxByOrNull { it.timestamp ?: 0L } }
+            .sortedByDescending { it.timestamp ?: 0L }
+        val selected = uniqueEntries.firstOrNull {
+            targetApiKey != null && entryApiKey(it) == targetApiKey
+        } ?: uniqueEntries.first()
+
+        for (entry in uniqueEntries) {
+            val apiKey = entryApiKey(entry) ?: continue
+            if (!presentKeys.add(apiKey)) continue
+            val template = findReactionTemplate(channelId, messageId, entry.emojiKey, entry.reactionType)
+            val reaction = createZeroCountMessageReaction(entry, template, loader) ?: continue
+            val item = createReactionEmojiTabItem(loader, reaction, entry.emojiKey == selected.emojiKey)
+                ?: continue
+            items.add(item)
+        }
+
+        val modelClass = loader.loadClass(MANAGE_REACTIONS_MODEL)
+        val constructor = modelClass.declaredConstructors.firstOrNull {
+            it.parameterCount == 2 &&
+                List::class.java.isAssignableFrom(it.parameterTypes[0]) &&
+                List::class.java.isAssignableFrom(it.parameterTypes[1])
+        } ?: return null
+        return runCatching {
+            constructor.isAccessible = true
+            constructor.newInstance(items, emptyList<Any>())
+        }.onFailure {
+            XposedBridge.log("Reaction Logs: could not create fallback ManageReactionsModel: $it")
+        }.getOrNull()
+    }
+
     private fun hookReactionUserRows(dexFinder: DexFinder) {
         val widgetClass = dexFinder.classLoader.loadClass(MANAGE_REACTIONS_WIDGET)
         val configureUi = widgetClass.declaredMethods.firstOrNull {
