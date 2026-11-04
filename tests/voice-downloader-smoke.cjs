@@ -5,8 +5,9 @@ const script = fs.readFileSync(path.join(__dirname, '../plugins/voice-message-do
 const saved = [];
 const alerts = [];
 const errors = [];
+const changes = [];
 let moduleRef;
-let patch = null;
+let copiedPath = '';
 
 const ActionSheet = function ActionSheet() {};
 const ActionSheetRow = function ActionSheetRow() {};
@@ -26,8 +27,24 @@ const Design = {
 const createElement = (type, props, ...children) => ({
   type, props: Object.assign({}, props || {}, { children: children.length === 1 ? children[0] : children })
 });
+const valenced = {
+  discord: {
+    design: { Design },
+    native: {
+      FileModule: {
+        getConstants: () => ({ DocumentsDirPath: '/app/documents', CacheDirPath: '/app/cache' })
+      }
+    }
+  },
+  externals: {
+    ReactNativeClipboard: {
+      Clipboard: { setString: async value => { copiedPath = value; } }
+    }
+  },
+  react: { React: { createElement } }
+};
 const exported = new Function('valenced', 'plugin', 'alert', 'fetch', 'return ' + script)(
-  { discord: { design: { Design } }, react: { React: { createElement } } },
+  valenced,
   options => options,
   message => alerts.push(message),
   async () => ({
@@ -40,7 +57,9 @@ const exported = new Function('valenced', 'plugin', 'alert', 'fetch', 'return ' 
 assert.equal(typeof exported.default, 'object');
 assert.equal(typeof exported.default.start, 'function');
 assert.equal(typeof exported.default.SettingsComponent, 'function');
-assert.deepEqual(exported.default.jsonStorage.default, { storageDir: 'documents', folder: 'voice-messages', lastSavedPath: '' });
+assert.deepEqual(exported.default.jsonStorage.default, {
+  storageDir: 'documents', folder: 'voice-messages', lastSavedPath: ''
+});
 
 function walk(node, out = []) {
   if (!node || typeof node !== 'object') return out;
@@ -50,7 +69,6 @@ function walk(node, out = []) {
   return out;
 }
 
-const changes = [];
 const ui = exported.default.SettingsComponent({
   api: { jsonStorage: { use: () => ({}), set: value => changes.push(value) } }
 });
@@ -62,10 +80,6 @@ assert.ok(radio && folder && locationRow, 'Configure exposes storage, folder and
 radio.props.onChange('cache');
 folder.props.onChange('Music/Discord');
 assert.deepEqual(changes, [{ storageDir: 'cache' }, { folder: 'Music/Discord' }]);
-(async () => {
-  await locationRow.props.onPress();
-  assert.equal(globalThis.copiedPath, '/app/documents/voice-messages');
-})();
 
 const unscoped = {
   modules: {
@@ -103,7 +117,10 @@ const unscoped = {
 
 exported.default.start({
   cleanup() {},
-  jsonStorage: { cache: { storageDir: 'cache', folder: 'Music/Discord' }, set: async value => changes.push(value) },
+  jsonStorage: {
+    cache: { storageDir: 'cache', folder: 'Music/Discord' },
+    set: async value => changes.push(value)
+  },
   plugin: { reportError: value => errors.push(value) },
   unscoped
 });
@@ -122,6 +139,9 @@ const action = walk(tree).find(node => node.type === ActionSheetRow);
 assert.ok(action, 'voice message long-press action is inserted');
 
 (async () => {
+  await locationRow.props.onPress();
+  assert.equal(copiedPath, '/app/documents/voice-messages');
+
   await action.props.onPress();
   assert.equal(saved.length, 1);
   assert.equal(saved[0].dir, 'cache');
@@ -130,7 +150,10 @@ assert.ok(action, 'voice message long-press action is inserted');
   assert.equal(saved[0].encoding, 'base64');
   assert.equal(saved[0].base64, Buffer.from([0, 1, 2, 253, 254, 255]).toString('base64'));
   assert.equal(errors.length, 0);
-  assert.match(alerts[0], /Voice message saved successfully/);
-  assert.deepEqual(changes.at(-1), { lastSavedPath: '/app/cache/Music/Discord/' + saved[0].file.split('/').at(-1) });
-  console.log('PASS: loader contract, Configure UI, CDN fetch, base64 conversion and configured storage write.');
+  assert.match(alerts[0], /Save location copied/);
+  assert.match(alerts[1], /Voice message saved successfully/);
+  assert.deepEqual(changes.at(-1), {
+    lastSavedPath: '/app/cache/Music/Discord/' + saved[0].file.split('/').at(-1)
+  });
+  console.log('PASS: loader contract, Configure UI, location copy, CDN fetch, base64 conversion and configured storage write.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
