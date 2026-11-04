@@ -395,6 +395,40 @@ internal class ReactionLogHooks(
             it.name == "isBurstReaction" && it.parameterCount == 0
         } ?: error("ReactionView.Reaction.isBurstReaction not found")
 
+        // The original adapter sends this exact Reaction interface to
+        // ChatEventHandler.onTapReaction. Capture the target before the handler
+        // converts it to ManageReactions arguments; zero-count proxy pills must
+        // still open their own matching emoji tab.
+        val adapterClass = runCatching {
+            dexFinder.classLoader.loadClass("com.discord.chat.presentation.message.MessageAccessoriesAdapter")
+        }.getOrNull()
+        val reactionTap = adapterClass?.declaredMethods?.firstOrNull { method ->
+            Modifier.isStatic(method.modifiers) &&
+                method.name.contains("onBindViewHolder") &&
+                method.name.contains("lambda") &&
+                method.parameterCount == 2 &&
+                reactionInterface.isAssignableFrom(method.parameterTypes[1])
+        }?.apply { isAccessible = true }
+        if (reactionTap != null) {
+            unhooks += reactionTap.hook(before = { param ->
+                val reaction = param.args.getOrNull(1) ?: return@hook
+                val emoji = readMember(reaction, "emoji") ?: return@hook
+                popupTargetApiKey = emojiApiKey(emoji)
+                popupTargetReactionType = runCatching {
+                    isBurstReaction.invoke(reaction) as? Boolean
+                }.getOrNull()?.let { if (it) 1 else 0 }
+            })
+            XposedBridge.log(
+                "Reaction Logs: captured original reaction tap target with " +
+                    reactionTap.toGenericString(),
+            )
+        } else {
+            XposedBridge.log(
+                "Reaction Logs: original MessageAccessoriesAdapter reaction-tap callback not found; " +
+                    "popup target will fall back to WidgetManageReactions arguments",
+            )
+        }
+
         val onBindViewHolder = dexFinder.findMethod {
             matcher {
                 paramCount(2)
@@ -800,7 +834,7 @@ internal class ReactionLogHooks(
     }
 
     private fun entryApiKey(entry: RemovalEntry): String? =
-        entry.emojiId ?: entry.emojiName
+        entry.emojiId ?: entry.emojiName?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
             ?: entry.emojiKey.takeIf { it.startsWith("unicode:") }?.removePrefix("unicode:")
 
     private fun hasPositiveReactionTab(model: Any?, targetApiKey: String): Boolean {
