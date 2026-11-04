@@ -76,7 +76,10 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         let stopped = false
         let eventSequence = 0
         const pendingEvents: Array<{ event: FluxEventName; payload: ReactionPayload }> = []
-        const persistence = createReactionPersistenceQueue(jsonStorage, (error, sequence) => {
+        const persistence = createReactionPersistenceQueue({
+            set: (value, replace) => jsonStorage.set(value, replace ?? true),
+            get: () => jsonStorage.get(),
+        }, (error, sequence) => {
             plugin.reportError('Could not verify persisted reaction history (write ' + sequence + '): ' + String(error))
             console.error('[Reaction Logs] storage write/read-back verification failed', { sequence, error })
         })
