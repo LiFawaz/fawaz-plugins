@@ -385,4 +385,23 @@ describe('Reaction Logs event state', () => {
         expect(current.removalHistory.map(item => item.reactionType)).toEqual([1])
     })
 
+    test('bulk clears never resurrect an older removal after that user re-added', () => {
+        let current = applyReactionRemove(state(), base(), 10)
+        current = applyReactionAdd(current, base(), 20)
+        expect(buildNativeSnapshot(current, 20).activeRemovals).toHaveLength(0)
+
+        current = applyRemoveAll(current, base(), 30)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.activeReactions).toHaveLength(0)
+        expect(buildNativeSnapshot(current, 30).activeRemovals).toHaveLength(0)
+
+        current = applyReactionAdd(current, base({ user_id: 'user-2' }), 40)
+        expect(buildNativeSnapshot(current, 40).activeRemovals).toHaveLength(0)
+
+        current = applyReactionAdd(current, base(), 50)
+        current = applyRemoveEmoji(current, base(), 60)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(buildNativeSnapshot(current, 60).activeRemovals).toHaveLength(0)
+    })
+
 })
