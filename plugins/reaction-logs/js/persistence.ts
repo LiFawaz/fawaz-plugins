@@ -34,16 +34,17 @@ export function createReactionPersistenceQueue(
             // Freeze the exact state at enqueue time. A later Flux event must not
             // mutate the document that is currently waiting to be written.
             const captured = JSON.parse(JSON.stringify(snapshot)) as ReactionStorage
-            queue = queue
-                .then(() => persistAndVerifyReactionStorage(storage, captured))
-                .catch(error => {
-                    try {
-                        onError(error, currentSequence)
-                    } catch {
-                        // An error reporter must never poison the persistence queue.
-                    }
-                })
-            return queue
+            const operation = queue.then(() => persistAndVerifyReactionStorage(storage, captured))
+            // Keep the internal queue alive after a failed write, but return the
+            // original rejecting operation so the caller cannot log false success.
+            queue = operation.catch(error => {
+                try {
+                    onError(error, currentSequence)
+                } catch {
+                    // An error reporter must never poison the persistence queue.
+                }
+            })
+            return operation
         },
         drain(): Promise<void> {
             return queue
