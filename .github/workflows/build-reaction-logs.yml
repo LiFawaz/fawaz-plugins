@@ -1,0 +1,91 @@
+name: Build Reaction Logs
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "plugins/reaction-logs/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build-reaction-logs.yml"
+  pull_request:
+    paths:
+      - "plugins/reaction-logs/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build-reaction-logs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Run reaction state regression tests
+        run: bun test plugins/reaction-logs/tests
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.1"
+
+      - name: Build and package Reaction Logs
+        run: gradle --no-daemon packageReactionLogs
+        env:
+          GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN || github.token }}
+
+      - name: Validate installable ZIP and DEX payload
+        run: |
+          python - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+
+          manifest = json.loads(Path("plugins/reaction-logs/manifest.json").read_text())
+          archive = Path(f"build/dist/{manifest['id']}@{manifest['version']}.zip")
+          assert archive.is_file(), f"Missing package: {archive}"
+          with zipfile.ZipFile(archive) as package:
+              assert package.testzip() is None, "ZIP integrity check failed"
+              names = set(package.namelist())
+              assert {"manifest.json", "index.js", "plugin.jar"} <= names, names
+              assert not any(name.startswith("/") or name.startswith("../") for name in names)
+              packaged_manifest = json.loads(package.read("manifest.json"))
+              assert packaged_manifest["id"] == manifest["id"]
+              assert packaged_manifest["version"] == manifest["version"]
+              native = zipfile.ZipFile(package.open("plugin.jar"))
+              assert "classes.dex" in native.namelist(), native.namelist()
+          print(f"PASS: {archive} contains manifest.json, index.js and a DEXed plugin.jar.")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reaction-logs-1.4.0-install-zip
+          path: build/dist/lifawaz.reaction-logs@1.4.0.zip
+          if-no-files-found: error
+          retention-days: 14
