@@ -1,0 +1,137 @@
+name: Build and publish Voice Message Downloader
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/voice-message-downloader/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build-voice-downloader.yml"
+  pull_request:
+    paths:
+      - "plugins/voice-message-downloader/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradle.properties"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build-voice-downloader.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.1"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install JavaScript build dependencies
+        run: bun install
+
+      - name: Check JavaScript syntax and downloader contract
+        run: |
+          node --check plugins/voice-message-downloader/js/index.js
+          node tests/voice-downloader-smoke.cjs
+
+      - name: Build JavaScript and native Android plugin
+        run: gradle --no-daemon packageVoiceMessageDownloader
+        env:
+          GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN || github.token }}
+
+      - name: Verify install ZIP and DEX payload
+        run: |
+          python - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+
+          archive = Path("build/dist/com.lifawaz.voice-message-downloader@1.0.6.zip")
+          assert archive.is_file(), f"Missing build output: {archive}"
+          with zipfile.ZipFile(archive) as package:
+              assert package.testzip() is None, "Plugin ZIP integrity check failed"
+              names = set(package.namelist())
+              assert {"manifest.json", "index.js", "plugin.jar"} <= names, names
+              manifest = json.loads(package.read("manifest.json"))
+              assert manifest["version"] == "1.0.6"
+              assert manifest["dist"]["android"]["class"] == "com.lifawaz.voicemessagedownloader.VoiceMessageDownloader"
+              native_jar = zipfile.ZipFile(package.open("plugin.jar"))
+              assert "classes.dex" in native_jar.namelist(), native_jar.namelist()
+          print(f"PASS: {archive} contains manifest, JavaScript and a DEXed native plugin.")
+          PY
+
+      - name: Publish package and update repository index
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import shutil
+          from pathlib import Path
+          
+          plugin_id = "com.lifawaz.voice-message-downloader"
+          version = "1.0.6"
+          archive = Path(f"build/dist/{plugin_id}@{version}.zip")
+          pool = Path("pool")
+          pool.mkdir(exist_ok=True)
+          destination = pool / archive.name
+          shutil.copy2(archive, destination)
+          
+          data = destination.read_bytes()
+          index_path = Path("index.json")
+          index = json.loads(index_path.read_text(encoding="utf-8"))
+          plugin = index["plugins"][plugin_id]
+          manifest = json.loads(Path("plugins/voice-message-downloader/manifest.json").read_text(encoding="utf-8"))
+          plugin["description"] = manifest["description"]
+          plugin.setdefault("channels", {})["latest"] = version
+          plugin.setdefault("versions", {})[version] = {
+              "url": f"https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/{plugin_id}%40{version}.zip",
+              "sha256": hashlib.sha256(data).hexdigest(),
+              "size": len(data),
+              "dependencies": manifest.get("dependencies", {})
+          }
+          index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          print(f"Prepared {destination} ({len(data)} bytes)")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pool/com.lifawaz.voice-message-downloader@1.0.6.zip index.json
+          git diff --cached --quiet || git commit -m "Publish Voice Message Downloader 1.0.6"
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-message-downloader-1.0.6
+          path: build/dist/com.lifawaz.voice-message-downloader@1.0.6.zip
+          if-no-files-found: error

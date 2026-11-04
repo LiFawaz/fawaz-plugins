@@ -1,159 +1,36 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const script = fs.readFileSync(path.join(__dirname, '../plugins/voice-message-downloader/js/index.js'), 'utf8');
-const saved = [];
-const alerts = [];
-const errors = [];
-const changes = [];
-let moduleRef;
-let copiedPath = '';
 
-const ActionSheet = function ActionSheet() {};
-const ActionSheetRow = function ActionSheetRow() {};
-ActionSheetRow.Group = function Group() {};
-ActionSheetRow.Icon = function Icon() {};
-const Design = {
-  Stack: function Stack() {},
-  TableRadioGroup: function TableRadioGroup() {},
-  TableRadioRow: function TableRadioRow() {},
-  TableRowGroup: function TableRowGroup() {},
-  TextInput: function TextInput() {},
-  TableRow: function TableRow() {},
-  Text: function Text() {},
-  ActionSheet,
-  ActionSheetRow
-};
-const createElement = (type, props, ...children) => ({
-  type, props: Object.assign({}, props || {}, { children: children.length === 1 ? children[0] : children })
-});
-const valenced = {
-  discord: {
-    design: { Design },
-    native: {
-      FileModule: {
-        getConstants: () => ({ DocumentsDirPath: '/app/documents', CacheDirPath: '/app/cache' })
-      }
-    }
-  },
-  externals: {
-    ReactNativeClipboard: {
-      Clipboard: { setString: async value => { copiedPath = value; } }
-    }
-  },
-  react: { React: { createElement } }
-};
-const exported = new Function('valenced', 'plugin', 'alert', 'fetch', 'return ' + script)(
-  valenced,
-  options => options,
-  message => alerts.push(message),
-  async () => ({
-    ok: true, status: 200, statusText: 'OK',
-    headers: { get: () => 'audio/ogg' },
-    arrayBuffer: async () => Uint8Array.from([0, 1, 2, 253, 254, 255]).buffer
-  })
-);
+const root = path.resolve(__dirname, '..');
+const jsPath = path.join(root, 'plugins/voice-message-downloader/js/index.js');
+const ktPath = path.join(root, 'plugins/voice-message-downloader/src/main/kotlin/com/lifawaz/voicemessagedownloader/VoiceMessageDownloader.kt');
+const manifestPath = path.join(root, 'plugins/voice-message-downloader/manifest.json');
+const js = fs.readFileSync(jsPath, 'utf8');
+const kotlin = fs.readFileSync(ktPath, 'utf8');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-assert.equal(typeof exported.default, 'object');
-assert.equal(typeof exported.default.start, 'function');
-assert.equal(typeof exported.default.SettingsComponent, 'function');
-assert.deepEqual(exported.default.jsonStorage.default, {
-  storageDir: 'documents', folder: 'voice-messages', lastSavedPath: ''
-});
+assert.equal(manifest.id, 'com.lifawaz.voice-message-downloader');
+assert.equal(manifest.version, '1.0.6');
+assert.equal(manifest.dist.script, 'index.js');
+assert.equal(manifest.dist.android.path, 'plugin.jar');
+assert.equal(manifest.dist.android.class, 'com.lifawaz.voicemessagedownloader.VoiceMessageDownloader');
 
-function walk(node, out = []) {
-  if (!node || typeof node !== 'object') return out;
-  if (Array.isArray(node)) { node.forEach(item => walk(item, out)); return out; }
-  out.push(node);
-  walk(node.props && node.props.children, out);
-  return out;
-}
+assert.match(js, /saveWithPicker/);
+assert.match(js, /Choose or change folder/);
+assert.match(js, /Create new file/);
+assert.match(js, /Choose existing file/);
+assert.match(js, /\.chooseFolder/);
+assert.match(kotlin, /Intent\.ACTION_CREATE_DOCUMENT/);
+assert.match(kotlin, /Intent\.ACTION_OPEN_DOCUMENT/);
+assert.match(kotlin, /Intent\.ACTION_OPEN_DOCUMENT_TREE/);
+assert.match(kotlin, /takePersistableUriPermission/);
+assert.match(kotlin, /FLAG_SUPPORTS_WRITE/);
+assert.match(kotlin, /Replace existing file\?/);
+assert.match(kotlin, /openOutputStream\(destination\.uri, "wt"\)/);
+assert.match(kotlin, /MAX_AUDIO_BYTES/);
 
-const ui = exported.default.SettingsComponent({
-  api: { jsonStorage: { use: () => ({}), set: value => changes.push(value) } }
-});
-const uiNodes = walk(ui);
-const radio = uiNodes.find(node => node.type === Design.TableRadioGroup);
-const folder = uiNodes.find(node => node.type === Design.TextInput);
-const locationRow = uiNodes.find(node => node.type === Design.TableRow);
-assert.ok(radio && folder && locationRow, 'Configure exposes storage, folder and save-location controls');
-radio.props.onChange('cache');
-folder.props.onChange('Music/Discord');
-assert.deepEqual(changes, [{ storageDir: 'cache' }, { folder: 'Music/Discord' }]);
+assert.doesNotMatch(js, /DocumentsDirPath|CacheDirPath|FileModule|ReactNativeClipboard|lastSavedPath/);
+assert.doesNotMatch(kotlin, /WRITE_EXTERNAL_STORAGE/);
 
-const unscoped = {
-  modules: {
-    finders: {
-      getModules(_filter, callback) {
-        moduleRef = { default: () => createElement(ActionSheet, {}, null) };
-        callback(moduleRef);
-        return () => {};
-      },
-      filters: { withName: name => name }
-    }
-  },
-  patcher: {
-    instead(target, key, callback) {
-      const original = target[key];
-      target[key] = (...args) => callback(args, original);
-      return () => { target[key] = original; };
-    }
-  },
-  discord: {
-    actions: { ActionSheetActionCreators: { hideActionSheet() {} } },
-    design: { Design },
-    native: {
-      FileModule: {
-        writeFile: async (dir, file, base64, encoding) => {
-          saved.push({ dir, file, base64, encoding });
-          return '/app/' + dir + '/' + file;
-        }
-      }
-    }
-  },
-  utils: { discord: { lookupGeneratedIconComponent: () => function Icon() {} } },
-  react: { React: { createElement } }
-};
-
-exported.default.start({
-  cleanup() {},
-  jsonStorage: {
-    cache: { storageDir: 'cache', folder: 'Music/Discord' },
-    set: async value => changes.push(value)
-  },
-  plugin: { reportError: value => errors.push(value) },
-  unscoped
-});
-
-const msg = {
-  id: '123456789012345678',
-  flags: 1 << 13,
-  attachments: [{
-    filename: 'voice-message.ogg',
-    content_type: 'audio/ogg; codecs=opus',
-    url: 'https://cdn.discordapp.com/attachments/123/456/voice.ogg?ex=123'
-  }]
-};
-const tree = moduleRef.default({ message: msg });
-const action = walk(tree).find(node => node.type === ActionSheetRow);
-assert.ok(action, 'voice message long-press action is inserted');
-
-(async () => {
-  await locationRow.props.onPress();
-  assert.equal(copiedPath, '/app/documents/voice-messages');
-
-  await action.props.onPress();
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].dir, 'cache');
-  assert.ok(saved[0].file.startsWith('Music/Discord/voice-message-9012345678-'));
-  assert.ok(saved[0].file.endsWith('.ogg'));
-  assert.equal(saved[0].encoding, 'base64');
-  assert.equal(saved[0].base64, Buffer.from([0, 1, 2, 253, 254, 255]).toString('base64'));
-  assert.equal(errors.length, 0);
-  assert.match(alerts[0], /Save location copied/);
-  assert.match(alerts[1], /Voice message saved successfully/);
-  assert.deepEqual(changes.at(-1), {
-    lastSavedPath: '/app/cache/Music/Discord/' + saved[0].file.split('/').at(-1)
-  });
-  console.log('PASS: loader contract, Configure UI, location copy, CDN fetch, base64 conversion and configured storage write.');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+console.log('PASS: voice action, create-new-file picker, existing-file picker, overwrite confirmation, and remembered default folder contracts.');

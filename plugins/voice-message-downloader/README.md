@@ -2,18 +2,19 @@
 
 Adds **Download Voice Message** to the long-press action sheet for native Discord voice messages.
 
-## Choose where audio is saved
+## Saving a voice message
 
-Open the plugin's **Configure** section and tap **Choose or change folder**. Android's system file picker opens. Select an existing folder, or create a new folder in the picker when the selected file provider offers that option.
+Every download opens Android's system file picker. The first prompt lets you choose one of two actions:
 
-The selected folder is remembered. The first download also opens the picker automatically when no folder has been selected yet.
+- **Create new file** opens Android's Save As picker. Choose a folder and filename. You can create a folder in the picker when the selected document provider supports it. If the same name already exists, Android creates a numbered copy instead of overwriting it.
+- **Choose existing file** opens the audio file picker. Select an existing audio file; the plugin checks that the provider supports writing and asks you to confirm before replacing its contents.
 
-## Saving behaviour
+## Remember a default folder
 
-The native Android component uses Android's Storage Access Framework with ACTION_OPEN_DOCUMENT_TREE. It takes a persistable write permission for the selected folder and stores the folder URI in the plugin's private data directory. The permission is intended to survive plugin restarts and Android process restarts.
+In Configure, choose **Choose or change folder** to select an optional default folder. Android remembers the write permission, and later file pickers start in that folder. The first download still lets you choose a different folder or an existing file.
 
-When a voice message is downloaded, the native component streams the Discord CDN attachment directly into a new document in the selected folder. The audio is not stored in Valenced's private Documents or Cache folders, and the plugin does not copy a private app path to the clipboard.
+## Storage and safety
 
-If Android revokes access to the folder or the folder is removed, open Configure and choose another folder. Downloads are limited to 50 MB and are accepted only from Discord's HTTPS attachment CDN hosts.
+The plugin uses Android's Storage Access Framework through a native Kotlin component. Audio downloads are first checked and staged in temporary app cache, then written to the selected document. Downloads are limited to 50 MB and accepted only from Discord's HTTPS attachment CDN hosts.
 
-Some Android system locations may be restricted by the system picker, and folder creation depends on the selected document provider.
+If the default folder is deleted or Android revokes its permission, choose it again in Configure. Existing-file replacement requires a document provider that advertises write support.

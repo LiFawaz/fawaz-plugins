@@ -4,6 +4,7 @@ const PLUGIN_ID = 'com.lifawaz.voice-message-downloader';
 const DEFAULTS = Object.freeze({ folderName: '' });
 const VOICE_FLAG = 1 << 13;
 const CDN_URL = /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/(?:attachments|ephemeral-attachments)\//i;
+const MAX_FILENAME_LENGTH = 140;
 
 const asError = error => error && typeof error.message === 'string' ? error.message : String(error);
 
@@ -54,7 +55,11 @@ function insertAction(tree, group, ActionSheet) {
 }
 
 function filenameFor(attachment, messageId) {
-  let name = String(attachment.filename || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+  let name = String(attachment.filename || 'voice-message.ogg')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .trim()
+    .slice(0, MAX_FILENAME_LENGTH);
+
   if (!name) name = 'voice-message.ogg';
   if (!/\.[a-z0-9]{2,8}$/i.test(name)) name += '.ogg';
 
@@ -62,47 +67,41 @@ function filenameFor(attachment, messageId) {
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot) : '.ogg';
   const suffix = messageId ? String(messageId).replace(/[^a-zA-Z0-9_-]/g, '').slice(-10) : 'audio';
-  return stem + '-' + (suffix || 'audio') + '-' + Date.now() + ext;
-}
-
-async function chooseFolder(jsonStorage, notify = true) {
-  const folderName = await callNativeMethod(PLUGIN_ID + '.chooseFolder', []);
-  if (!folderName) {
-    if (notify) alert('Folder selection was cancelled. Nothing was downloaded.');
-    return null;
-  }
-
-  await jsonStorage.set({ folderName });
-  if (notify) alert('Save folder selected:\n\n' + folderName + '\n\nThis folder will be remembered for future voice messages.');
-  return folderName;
+  return stem + '-' + (suffix || 'audio') + ext;
 }
 
 function SettingsComponent({ api }) {
   const stored = Object.assign({}, DEFAULTS, api.jsonStorage.use() || {});
   const folderName = typeof stored.folderName === 'string' && stored.folderName
     ? stored.folderName
-    : 'No folder selected';
+    : 'Not selected — Android Files will open at its default location';
   const Design = valenced.discord.design.Design;
   const h = valenced.react.React.createElement;
 
-  const choose = async () => {
+  const chooseFolder = async () => {
     try {
-      await chooseFolder(api.jsonStorage);
+      const name = await callNativeMethod(PLUGIN_ID + '.chooseFolder', []);
+      if (!name) return;
+      await api.jsonStorage.set({ folderName: name });
+      alert('Default folder saved: ' + name + '\n\nThe Android file picker will open there next time.');
     } catch (error) {
-      alert('Could not open Android Files:\n\n' + asError(error));
+      alert('Could not choose an Android folder:\n\n' + asError(error));
     }
   };
 
   return h(Design.Stack, { spacing: 16 },
-    h(Design.TableRowGroup, { title: 'Android save folder' },
+    h(Design.TableRowGroup, { title: 'Default save folder (optional)' },
       h(Design.TableRow, {
         label: 'Choose or change folder',
         subLabel: folderName,
-        onPress: choose
+        onPress: chooseFolder
       })
     ),
     h(Design.Text, { variant: 'text-sm/normal' },
-      'Android Files will open. Select an existing folder, or create a new folder in the picker when your file provider supports it. The selected folder and its write permission are remembered, so future downloads go there automatically.'
+      'Every download opens Android Files. Choose Create new file to pick a folder and filename, or Choose existing file to replace an audio file after confirmation. The optional default folder is remembered and used as the picker starting location.'
+    ),
+    h(Design.Text, { variant: 'text-sm/normal' },
+      'Create new file never overwrites an existing file. Android adds a number if the same filename already exists.'
     )
   );
 }
@@ -118,7 +117,7 @@ const options = plugin({
           return jsonStorage.set({ folderName });
         }
       })
-      .catch(error => pluginApi.reportError('Could not read the Android save folder: ' + asError(error)));
+      .catch(error => pluginApi.reportError('Could not read the Android default folder: ' + asError(error)));
 
     const getModules = unscoped.modules.finders.getModules;
     const withName = unscoped.modules.finders.filters.withName;
@@ -141,7 +140,7 @@ const options = plugin({
           const attachment = voiceAttachment(message);
           if (!attachment) return tree;
 
-          const name = filenameFor(attachment, message.id);
+          const suggestedName = filenameFor(attachment, message.id);
           const group = h(ActionSheetRow.Group, null,
             h(ActionSheetRow, {
               label: 'Download Voice Message',
@@ -150,30 +149,24 @@ const options = plugin({
                 try {
                   actionCreators.hideActionSheet();
 
-                  let folderName = await callNativeMethod(PLUGIN_ID + '.getFolder', []);
-                  if (typeof folderName !== 'string' || !folderName) {
-                    folderName = await chooseFolder(jsonStorage, false);
-                    if (!folderName) {
-                      alert('Folder selection was cancelled. Nothing was downloaded.');
-                      return;
-                    }
-                  }
-
-                  const result = await callNativeMethod(PLUGIN_ID + '.save', [
+                  const result = await callNativeMethod(PLUGIN_ID + '.saveWithPicker', [
                     attachment.url || attachment.proxy_url,
-                    name,
+                    suggestedName,
                     attachment.content_type
                   ]);
 
-                  const savedName = result && typeof result.filename === 'string' ? result.filename : name;
-                  const savedFolder = result && typeof result.folderName === 'string' ? result.folderName : folderName;
-                  await jsonStorage.set({ folderName: savedFolder });
-                  alert('Voice message saved successfully.\n\nFolder: ' + savedFolder + '\nFile: ' + savedName);
+                  if (!result || result.cancelled) {
+                    alert('Download cancelled. No file was saved.');
+                    return;
+                  }
+
+                  const filename = typeof result.filename === 'string' ? result.filename : suggestedName;
+                  const mode = result.replaced ? 'Existing file replaced' : 'New file created';
+                  alert('Voice message saved successfully.\n\n' + mode + ': ' + filename);
                 } catch (error) {
                   const detail = asError(error);
                   pluginApi.reportError('Voice message download failed: ' + detail);
-                  alert('Could not save ' + name + '.\n\n' + detail +
-                    '\n\nOpen Configure and choose the Android save folder again if its access was removed.');
+                  alert('Could not save ' + suggestedName + '.\n\n' + detail);
                 }
               }
             })
@@ -195,14 +188,3 @@ const options = plugin({
 });
 
 export default options;
-
-declare module '@valenced/modules/native' {
-  export interface NativeMethods {
-    'com.lifawaz.voice-message-downloader.chooseFolder': [args: [], returnValue: string | null];
-    'com.lifawaz.voice-message-downloader.getFolder': [args: [], returnValue: string | null];
-    'com.lifawaz.voice-message-downloader.save': [
-      args: [url: string, filename: string, contentType: string],
-      returnValue: { filename: string; folderName: string }
-    ];
-  }
-}

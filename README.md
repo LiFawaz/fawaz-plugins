@@ -20,20 +20,16 @@ Then open the plugin browser and install the plugins you want.
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.6 | Saves voice messages directly into a chosen Android Files folder |
+| Voice Message Downloader | 1.0.6 | Saves voice messages through Android Files |
 
 **Hidden Channels is intentionally excluded.**
 
-## Voice Message Downloader storage
+## Voice Message Downloader
 
-Open its **Configure** section and tap **Choose or change folder**. Android's system file picker opens. Select a folder or create a new one where the file provider supports it. The plugin remembers the folder and saves future voice messages there automatically. The first download opens the picker when no folder is configured.
+Every download opens Android Files. Choose **Create new file** to select a folder and filename, or **Choose existing file** to replace an audio file after a confirmation prompt. Configure also lets you save an optional default folder so the picker starts there next time.
 
-The downloader uses Android's Storage Access Framework and a native Kotlin component. It writes audio into the selected folder instead of Valenced's private Documents or Cache storage. It does not copy a private app path to the clipboard.
+The plugin uses Android's Storage Access Framework and a native Kotlin component. It does not save voice messages into Valenced's private Documents or Cache folders.
 
 ## Source repositories
 
 [VC Follow](https://github.com/LiFawaz/valenced-vc-follow) · [Fake-deaf](https://github.com/LiFawaz/valenced-fake-deaf) · [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere) · [Reaction Logs](https://github.com/LiFawaz/reaction-logs)
-
-## Repository checks
-
-GitHub Actions validates locally hosted package sizes, SHA-256 hashes, ZIP integrity, and manifest ID/version consistency. It also checks the index, JavaScript syntax, and the Voice Message Downloader's Android folder-picker and native bridge contract.
