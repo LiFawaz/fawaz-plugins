@@ -20,7 +20,7 @@ Then open the plugin browser and install the plugins you want.
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.6 | Saves voice messages through Android Files |
+| Voice Message Downloader | 1.0.8 | Saves voice messages through Android Files |
 
 **Hidden Channels is intentionally excluded.**
 

@@ -11,7 +11,7 @@ const kotlin = fs.readFileSync(ktPath, 'utf8');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
 assert.equal(manifest.id, 'com.lifawaz.voice-message-downloader');
-assert.equal(manifest.version, '1.0.7');
+assert.equal(manifest.version, '1.0.8');
 assert.equal(manifest.dist.script, 'index.js');
 assert.equal(manifest.dist.android.path, 'plugin.jar');
 assert.equal(manifest.dist.android.class, 'com.lifawaz.voicemessagedownloader.VoiceMessageDownloader');
@@ -24,7 +24,7 @@ assert.match(kotlin, /takePersistableUriPermission/);
 assert.match(kotlin, /DocumentsContract\.createDocument/);
 assert.match(kotlin, /openOutputStream\(document, "wt"\)/);
 assert.match(kotlin, /requireAppContext/);
-assert.match(kotlin, /pluginDir/);
+assert.match(kotlin, /storageDir/);
 assert.match(kotlin, /MAX_AUDIO_BYTES/);
 
 assert.doesNotMatch(js, /saveWithPicker|Create new file|Choose existing file|DocumentsDirPath|CacheDirPath|FileModule|ReactNativeClipboard|lastSavedPath/);

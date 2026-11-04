@@ -41,7 +41,7 @@ private val pendingFolder = AtomicReference<CancellableContinuation<String?>?>(n
 val voiceMessageDownloader = plugin {
     start {
         hostScope = this
-        pluginStorage = pluginDir.apply { mkdirs() }
+        pluginStorage = storageDir.apply { mkdirs() }
         withAppActivity { activity -> appContext = activity.applicationContext }
 
         activityResultHook?.unhook()
