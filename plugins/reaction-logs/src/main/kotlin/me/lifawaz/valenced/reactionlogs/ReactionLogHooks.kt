@@ -650,7 +650,12 @@ internal class ReactionLogHooks(
             return
         }
 
-        val key = rowIdentityKey(context.channelId, context.messageId, context.emojiKey, userId)
+        // Resolve identity from the row payload itself so a delayed recycler bind
+        // from the previous emoji tab cannot inherit the newly selected tab's key.
+        val rowChannelId = readMember(data, "channelId")?.toString() ?: context.channelId
+        val rowMessageId = readMember(data, "messageId")?.toString() ?: context.messageId
+        val rowEmoji = readMember(data, "emoji")?.let(::emojiKey) ?: context.emojiKey
+        val key = rowIdentityKey(rowChannelId, rowMessageId, rowEmoji, userId)
         userRows[view] = RowBinding(key, userId)
         mainHandler.post {
             val binding = userRows[view] ?: return@post
@@ -742,7 +747,7 @@ internal class ReactionLogHooks(
         if (target == null) return null
         val suffix = name.replaceFirstChar { it.uppercase() }
         target.javaClass.methods.firstOrNull {
-            it.parameterCount == 0 && it.name in setOf(name, "get\$suffix", "is\$suffix")
+            it.parameterCount == 0 && it.name in setOf(name, "get$suffix", "is$suffix")
         }?.let { method ->
             runCatching { method.invoke(target) }.getOrNull()?.let { return it }
         }
