@@ -1,26 +1,17 @@
-import { Stores, onFluxEventDispatched } from '@valenced/discord/flux'
+import { onFluxEventDispatched } from '@valenced/discord/flux'
 import { setRemoved, clearRemoved } from './native'
+import {
+    applyBulkMessageDelete,
+    applyMessageDelete,
+    applyReactionAdd,
+    applyReactionRemove,
+    applyRemoveAll,
+    applyRemoveEmoji,
+    buildNativeSnapshot,
+    hydrateState,
+} from './state'
 import { DefaultStorage } from './shared'
-import type { ReactionStorage } from './shared'
-
-interface Emoji {
-    id?: string | null
-    name: string
-}
-
-interface ReactionPayload {
-    channelId?: string
-    messageId?: string
-    id?: string
-    ids?: string[]
-    userId?: string
-    emoji?: Emoji
-    reactionType?: number
-    burst?: boolean
-    guildId?: string
-    guild_id?: string
-    optimistic?: boolean
-}
+import type { ReactionPayload, ReactionStorage } from './shared'
 
 export default plugin<{ jsonStorage: ReactionStorage }>({
     jsonStorage: {
@@ -29,113 +20,51 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
     },
 
     start({ cleanup, plugin, jsonStorage }) {
-        // Only the active local red-marker state is retained.
-        const activeRemovals = new Map<string, Set<string>>()
-        for (const item of jsonStorage.cache?.activeRemovals ?? []) {
-            if (!item?.pillKey) continue
-            activeRemovals.set(item.pillKey, new Set(item.removedUsers ?? []))
-        }
-
+        let state = hydrateState(jsonStorage.cache, Date.now())
         let persistQueue = Promise.resolve()
-        const pendingRemovalEchoes = new Set<string>()
 
-        const persistState = () => {
+        const persist = () => {
             const snapshot: ReactionStorage = {
-                activeRemovals: [...activeRemovals].map(([pillKey, users]) => ({
-                    pillKey,
-                    removedUsers: [...users],
-                })),
+                schemaVersion: 2,
+                removalHistory: [...state.storage.removalHistory],
+                epochs: { ...state.storage.epochs },
             }
             persistQueue = persistQueue
                 .then(() => jsonStorage.set(snapshot, true))
                 .catch(error => {
-                    plugin.reportError('Failed to save removed reaction state: ' + String(error))
+                    plugin.reportError('Failed to persist removed reaction history: ' + String(error))
                 })
         }
 
         const syncNative = () => {
             try {
-                const entries = [...activeRemovals].map(([pillKey, users]) => ({
-                    pillKey,
-                    removedUsers: [...users]
-                        .filter(userId => userId !== '*')
-                        .map(id => ({ id })),
-                }))
-                setRemoved(JSON.stringify(entries))
+                setRemoved(JSON.stringify(buildNativeSnapshot(state, Date.now())))
             } catch (error) {
-                plugin.reportError('Failed to refresh removed reaction highlights: ' + String(error))
+                plugin.reportError('Failed to update reaction popup history: ' + String(error))
             }
         }
 
-        const makeKey = (payload: ReactionPayload): string | null => {
-            const emoji = payload.emoji
-            if (!emoji?.name || !payload.messageId) return null
-
-            const reactionType = payload.reactionType === 1 || payload.burst === true ? 1 : 0
-            const emojiKey = emoji.id ? emoji.name + ':' + emoji.id : emoji.name
-            return reactionKey(payload.messageId, emojiKey, reactionType)
-        }
-
-        const recordRemoval = (payload: ReactionPayload, key: string) => {
-            const userId = payload.userId || '*'
-            const token = key + '\u0000' + userId
-
-            // Ignore Discord's duplicate optimistic/gateway event pair without a timer.
-            if (userId !== '*' && pendingRemovalEchoes.delete(token)) return false
-            if (userId !== '*') pendingRemovalEchoes.add(token)
-
-            const users = activeRemovals.get(key) ?? new Set<string>()
-            users.add(userId)
-            activeRemovals.set(key, users)
-
-            persistState()
+        const update = (next: typeof state) => {
+            state = next
+            persist()
             syncNative()
-            return true
-        }
-
-        // Any new use of this exact emoji resets its red marker completely.
-        const clearActiveForKey = (key: string) => activeRemovals.delete(key)
-
-        const clearActiveMessage = (messageId?: string) => {
-            if (!messageId) return false
-            const prefix = messageId + '|'
-            let changed = false
-
-            for (const key of activeRemovals.keys()) {
-                if (key.startsWith(prefix)) {
-                    activeRemovals.delete(key)
-                    changed = true
-                }
-            }
-            return changed
         }
 
         cleanup(
             onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_REACTION_REMOVE',
+                'MESSAGE_REACTION_ADD',
                 payload => {
-                    const key = makeKey(payload)
-                    if (key) recordRemoval(payload, key)
-                    // Keep Discord from removing the local pill; only recolor it red.
-                    return undefined
+                    update(applyReactionAdd(state, payload))
+                    // Discord remains the source of truth for active reactors and counts.
+                    return payload
                 },
             ),
 
             onFluxEventDispatched<ReactionPayload>(
-                'MESSAGE_REACTION_ADD',
+                'MESSAGE_REACTION_REMOVE',
                 payload => {
-                    const key = makeKey(payload)
-                    if (!key) return payload
-
-                    const userId = payload.userId || '*'
-                    pendingRemovalEchoes.delete(key + '\u0000' + userId)
-
-                    if (clearActiveForKey(key)) {
-                        persistState()
-                        syncNative()
-                        // The retained local pill already represents this reaction.
-                        return undefined
-                    }
+                    update(applyReactionRemove(state, payload))
+                    // Record the affected user, then let Discord remove them from its active list.
                     return payload
                 },
             ),
@@ -143,10 +72,8 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_REACTION_REMOVE_ALL',
                 payload => {
-                    if (clearActiveMessage(payload.messageId)) {
-                        persistState()
-                        syncNative()
-                    }
+                    update(applyRemoveAll(state, payload))
+                    // This event has no per-user identity; do not manufacture removal records.
                     return payload
                 },
             ),
@@ -154,24 +81,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_REACTION_REMOVE_EMOJI',
                 payload => {
-                    if (!payload.messageId || !payload.emoji?.name) return payload
-                    const emojiKey = payload.emoji.id
-                        ? payload.emoji.name + ':' + payload.emoji.id
-                        : payload.emoji.name
-                    const prefix = payload.messageId + '|' + emojiKey + '|'
-                    let changed = false
-
-                    for (const key of activeRemovals.keys()) {
-                        if (key.startsWith(prefix)) {
-                            activeRemovals.delete(key)
-                            changed = true
-                        }
-                    }
-
-                    if (changed) {
-                        persistState()
-                        syncNative()
-                    }
+                    update(applyRemoveEmoji(state, payload))
                     return payload
                 },
             ),
@@ -179,10 +89,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_DELETE',
                 payload => {
-                    if (clearActiveMessage(payload.id ?? payload.messageId)) {
-                        persistState()
-                        syncNative()
-                    }
+                    update(applyMessageDelete(state, payload))
                     return payload
                 },
             ),
@@ -190,35 +97,23 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_DELETE_BULK',
                 payload => {
-                    let changed = false
-                    for (const messageId of payload.ids ?? []) {
-                        changed = clearActiveMessage(messageId) || changed
-                    }
-                    if (changed) {
-                        persistState()
-                        syncNative()
-                    }
+                    update(applyBulkMessageDelete(state, payload))
                     return payload
                 },
             ),
 
             () => {
-                activeRemovals.clear()
-                pendingRemovalEchoes.clear()
+                // Native view hooks are session-scoped. The persistent history remains in jsonStorage.
                 try {
                     clearRemoved()
                 } catch (error) {
-                    plugin.reportError('Could not clear reaction highlights: ' + String(error))
+                    plugin.reportError('Could not clear native reaction hooks: ' + String(error))
                 }
             },
         )
 
-        // Restore locally saved red markers immediately after the plugin starts.
+        // Migrate the previous 1.2.9 active-removals cache and restore historical popup rows.
+        persist()
         syncNative()
-        persistState()
     },
 })
-
-function reactionKey(messageId: string, emojiKey: string, reactionType: number) {
-    return messageId + '|' + emojiKey + '|' + reactionType
-}
