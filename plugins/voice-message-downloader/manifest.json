@@ -2,13 +2,19 @@
   "format": 1,
   "id": "com.lifawaz.voice-message-downloader",
   "name": "Voice Message Downloader",
-  "description": "Downloads Discord voice-message audio and lets you choose Documents or Cache and a custom folder inside Valenced app storage.",
+  "description": "Downloads Discord voice-message audio, lets you choose Documents or Cache and a custom folder, and shows/copies the exact save path.",
   "author": "Li Fawaz (https://github.com/LiFawaz)",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "icon": "DownloadIcon",
   "dependencies": {
-    "valenced.api": { "version": ">=1 <2" },
-    "discord": { "version": "*" }
+    "valenced.api": {
+      "version": ">=1 <2"
+    },
+    "discord": {
+      "version": "*"
+    }
   },
-  "dist": { "script": "index.js" }
+  "dist": {
+    "script": "index.js"
+  }
 }

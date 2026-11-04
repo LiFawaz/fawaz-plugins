@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = Object.freeze({ storageDir: 'documents', folder: 'voice-messages' });
+  const DEFAULTS = Object.freeze({ storageDir: 'documents', folder: 'voice-messages', lastSavedPath: '' });
   const VOICE_FLAG = 1 << 13;
   const CDN_URL = /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/(?:attachments|ephemeral-attachments)\//i;
   const MAX_BYTES = 50 * 1024 * 1024;
@@ -135,9 +135,25 @@
   }
 
   function SettingsComponent({ api }) {
-    const value = settingsOf(Object.assign({}, DEFAULTS, api.jsonStorage.use() || {}));
+    const stored = Object.assign({}, DEFAULTS, api.jsonStorage.use() || {});
+    const value = settingsOf(stored);
     const Design = valenced.discord.design.Design;
     const h = valenced.react.React.createElement;
+    const files = valenced.discord.native.FileModule;
+    const constants = files.getConstants();
+    const root = value.storageDir === 'cache' ? constants.CacheDirPath : constants.DocumentsDirPath;
+    const expectedPath = String(root || ('Valenced/' + value.storageDir)).replace(/\/+$/, '') + '/' + value.folder;
+    const location = typeof stored.lastSavedPath === 'string' && stored.lastSavedPath
+      ? stored.lastSavedPath
+      : expectedPath;
+    const showSaveLocation = async () => {
+      try {
+        await valenced.externals.ReactNativeClipboard.Clipboard.setString(location);
+        alert('Save location copied.\n\n' + location + '\n\nThis is Valenced app storage. It may not be visible in the normal Android Files app.');
+      } catch (error) {
+        alert('Save location:\n\n' + location + '\n\nThis is Valenced app storage. It may not be visible in the normal Android Files app.\n\n' + asError(error));
+      }
+    };
     return h(Design.Stack, { spacing: 20 },
       h(Design.TableRadioGroup, {
         title: 'Save location',
@@ -157,8 +173,15 @@
           onChange: folder => api.jsonStorage.set({ folder })
         })
       ),
+      h(Design.TableRowGroup, { title: 'Saved files' },
+        h(Design.TableRow, {
+          label: 'Show save location',
+          subLabel: 'Tap to copy the exact folder path.',
+          onPress: showSaveLocation
+        })
+      ),
       h(Design.Text, { variant: 'text-sm/normal' },
-        'This saves inside Valenced app storage. The current Valenced file API does not expose the public Android Downloads folder or Android folder picker.'
+        'The copied path is inside Valenced app storage. Android Files may not be able to browse this private folder, and the current Valenced API does not provide a public Downloads folder picker.'
       )
     );
   }
@@ -196,11 +219,12 @@
                     actionCreators.hideActionSheet();
                     const configured = settingsOf(jsonStorage.cache || DEFAULTS);
                     const path = await save(files, attachment, message.id, configured);
-                    alert('Voice message saved successfully.\\n\\n' + path);
+                    await jsonStorage.set({ lastSavedPath: path });
+                    alert('Voice message saved successfully.\n\n' + path + '\n\nOpen Configure and tap Show save location to copy this path.');
                   } catch (error) {
                     const detail = asError(error);
                     pluginApi.reportError('Voice message download failed: ' + detail);
-                    alert('Could not save ' + name + '.\\n\\n' + detail + '\\n\\nCheck Valenced Debug Logs for details.');
+                    alert('Could not save ' + name + '.\n\n' + detail + '\n\nCheck Valenced Debug Logs for details.');
                   }
                 }
               })

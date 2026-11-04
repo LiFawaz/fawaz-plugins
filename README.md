@@ -20,7 +20,7 @@ Then open the plugin browser and install the plugins you want.
 | Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
 | Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
 | Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.4 | Downloads voice audio and lets you choose app Documents or Cache and a folder |
+| Voice Message Downloader | 1.0.5 | Downloads voice audio, lets you choose app Documents or Cache, and copies the exact save path |
 
 **Hidden Channels is intentionally excluded.**
 
@@ -28,7 +28,7 @@ Then open the plugin browser and install the plugins you want.
 
 Open its **Configure** section. Choose **Documents** for persistent app storage or **Cache** for temporary app storage, then choose a folder name. Nested folders are supported, for example `Audio/Discord`.
 
-Valenced's exposed file API supports only app Documents and Cache. The plugin cannot save directly to the public Android Downloads folder through the current API. The plugin source is plain JavaScript under `plugins/voice-message-downloader/js/index.js`.
+The Configure screen now has **Show save location**, which copies the exact folder path (or the last saved file path) to the clipboard. Downloads are stored in Valenced's private Documents or Cache directory, not the public Android Downloads folder. Android's normal Files app may not be able to browse that private directory, and the current Valenced API does not expose a public folder picker. The plugin source is plain JavaScript under `plugins/voice-message-downloader/js/index.js`.
 
 ## Source repositories
 
