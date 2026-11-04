@@ -97,10 +97,10 @@
     },
     "com.lifawaz.voice-message-downloader": {
       "name": "Voice Message Downloader",
-      "description": "Saves Discord voice messages through Android Files, with options to create a new audio file or replace an existing one.",
+      "description": "Downloads Discord voice messages directly into a folder selected once in Android Files.",
       "author": "Li Fawaz (https://github.com/LiFawaz)",
       "channels": {
-        "latest": "1.0.6"
+        "latest": "1.0.7"
       },
       "versions": {
         "1.0.1": {
@@ -172,6 +172,19 @@
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.6.zip",
           "sha256": "903970814b933fe15d7f389c0b550e4ea0f71dbc519ca7ba91885b42d7d1a141",
           "size": 23329,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.7": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.voice-message-downloader%401.0.7.zip",
+          "sha256": "e56586887c88d37af73908658851dd8204022ddc35261824b5a577e21b1bd780",
+          "size": 19725,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
