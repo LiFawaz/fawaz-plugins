@@ -368,4 +368,21 @@ describe('Reaction Logs event state', () => {
         expect(Object.keys(current.epochs)).toHaveLength(MAX_ACTIVE_REACTIONS)
     })
 
+    test('Flux dispatch type is not mistaken for the reaction kind', () => {
+        const current = applyReactionRemove(state(), base({
+            type: 'MESSAGE_REACTION_REMOVE',
+            burst: false,
+        }), 50)
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.removalHistory[0].reactionType).toBe(0)
+    })
+
+    test('normal and burst Flux payload fields remain isolated for the same user and emoji', () => {
+        let current = applyReactionAdd(state(), base({ reaction_type: 0 }), 10)
+        current = applyReactionAdd(current, base({ reaction_type: 1 }), 11)
+        current = applyReactionRemove(current, base({ reaction_type: 1 }), 12)
+        expect(current.activeReactions.map(item => item.reactionType)).toEqual([0])
+        expect(current.removalHistory.map(item => item.reactionType)).toEqual([1])
+    })
+
 })
