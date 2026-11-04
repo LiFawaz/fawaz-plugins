@@ -300,6 +300,27 @@ export function applyReactionAdd(
     }
 
     state.activeReactions = [...active.values()]
+
+    // Legacy records did not store channel IDs, so their identity keys cannot
+    // equal a modern Flux identity. Still supersede matching legacy removals when
+    // this user ADDs the same message/emoji/type, preventing a later bulk clear
+    // from making that old record look current again.
+    for (const record of state.removalHistory) {
+        if (
+            !record.id.startsWith('legacy:') ||
+            record.messageId !== identity.messageId ||
+            record.userId !== identity.userId ||
+            record.emojiKey !== identity.emojiKey ||
+            record.reactionType !== identity.reactionType ||
+            (record.channelId.length > 0 && record.channelId !== identity.channelId) ||
+            (record.guildId && identity.guildId && record.guildId !== identity.guildId)
+        ) continue
+        state.epochs[record.identityKey] = Math.max(
+            state.epochs[record.identityKey] ?? 0,
+            record.epoch + 2,
+        )
+    }
+
     return normalizeReactionStorage(state, now)
 }
 
