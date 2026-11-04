@@ -398,6 +398,13 @@ internal class ReactionLogHooks(
             }
         } ?: error("MessageAccessoriesAdapter.items not found")
 
+        // MessageAccessory itself has messageId and accessoryDescription only.
+        // The current channel lives on MessageAccessoriesAdapter.setItems(...).
+        val adapterChannelId = onBindViewHolder.declaringClass.declaredFields
+            .firstOrNull { it.name == "channelId" }
+            ?.apply { isAccessible = true }
+            ?: error("MessageAccessoriesAdapter.channelId not found")
+
         val setReactions = dexFinder.findMethod {
             matcher {
                 declaredClass(SHORTCUTS_FLEXBOX)
@@ -414,7 +421,8 @@ internal class ReactionLogHooks(
                 if (item != null && accessoryClass.isInstance(item)) {
                     bindingMessageId.set(accessoryMessageId.invoke(item)?.toString())
                     bindingChannelId.set(
-                        readMember(item, "channelId")?.toString()?.takeIf { it.isNotBlank() && it != "null" },
+                        snowflakeId(adapterChannelId.get(param.thisObject))
+                            ?: snowflakeId(readMember(item, "channelId")),
                     )
                 } else {
                     bindingMessageId.remove()
@@ -855,6 +863,27 @@ internal class ReactionLogHooks(
             constructor.isAccessible = true
             constructor.newInstance(reactionItems, output)
         }.getOrNull() ?: model
+    }
+
+    private fun snowflakeId(value: Any?, depth: Int = 0): String? {
+        if (value == null || depth > 2) return null
+        when (value) {
+            is String -> return value.trim().takeIf { it.isNotEmpty() && it != "null" }
+            is Number -> return value.toLong().toString()
+        }
+
+        val boxed = readMember(value, "value")
+            ?: runCatching {
+                value.javaClass.methods.firstOrNull {
+                    it.name == "unbox-impl" && it.parameterCount == 0
+                }?.invoke(value)
+            }.getOrNull()
+        if (boxed != null && boxed !== value) snowflakeId(boxed, depth + 1)?.let { return it }
+
+        val rendered = value.toString().trim()
+        return rendered.takeIf {
+            it.isNotEmpty() && it != "null" && it.matches(Regex("\\d+"))
+        }
     }
 
     private fun readMember(target: Any?, name: String): Any? {
