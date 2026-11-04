@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { createReactionPersistenceQueue } from '../js/persistence'
 import {
-    applyReactionLogFluxEvent,
     copyFluxReactionPayload,
     getReactionLogFluxEvent,
+    reduceReactionLogFluxPayload,
 } from '../js/flux-events'
 import { buildNativeSnapshot, normalizeReactionStorage } from '../js/state'
 import { DefaultStorage } from '../js/shared'
@@ -36,9 +36,9 @@ function dispatchAction(
     action: FluxReactionPayload,
     now: number,
 ): ReactionStorage {
-    const event = getReactionLogFluxEvent(action)
-    if (!event) throw new Error(`Unexpected Flux action: ${action.type}`)
-    return applyReactionLogFluxEvent(current, event, action, now)
+    const reduced = reduceReactionLogFluxPayload(current, action, now)
+    if (!reduced) throw new Error(`Unexpected Flux action: ${action.type}`)
+    return reduced.state
 }
 
 describe('Reaction Logs raw Flux-to-state pipeline', () => {
@@ -118,14 +118,14 @@ describe('Reaction Logs raw Flux-to-state pipeline', () => {
             displayName: 'wave',
             animated: false,
         })
-        const event = getReactionLogFluxEvent(buffered)
-        expect(event).toBe('MESSAGE_REACTION_REMOVE')
-        const current = applyReactionLogFluxEvent(
+        const reduced = reduceReactionLogFluxPayload(
             structuredClone(DefaultStorage),
-            event!,
             buffered,
             30,
         )
+        expect(getReactionLogFluxEvent(buffered)).toBe('MESSAGE_REACTION_REMOVE')
+        expect(reduced?.event).toBe('MESSAGE_REACTION_REMOVE')
+        const current = reduced!.state
         expect(current.removalHistory).toHaveLength(1)
         expect(current.removalHistory[0]).toMatchObject({
             channelId: 'channel-8',
