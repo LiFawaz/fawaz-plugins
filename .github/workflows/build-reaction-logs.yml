@@ -60,6 +60,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN || github.token }}
 
+      - name: Type-check Reaction Logs TypeScript
+        run: bunx tsc --noEmit -p plugins/reaction-logs/tsconfig.json
+
       - name: Validate installable ZIP and DEX payload
         run: |
           python - <<'PY'

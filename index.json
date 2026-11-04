@@ -74,29 +74,16 @@
     },
     "lifawaz.reaction-logs": {
       "name": "Reaction Logs",
-      "description": "Retain removed reaction users in the matching reaction popup.",
+      "description": "Keep removed reaction pills highlighted red locally until the same emoji is added again.",
       "author": "Li Fawaz",
       "channels": {
-        "latest": "1.4.0"
+        "latest": "1.2.9"
       },
       "versions": {
         "1.2.9": {
           "url": "https://raw.githubusercontent.com/LiFawaz/reaction-logs/gh-pages/pool/lifawaz.reaction-logs%401.2.9.zip",
           "sha256": "3185ddc04acfaace550ceb38811380dd269e9c1d7f1c7b4dc8234257947a7203",
           "size": 28504,
-          "dependencies": {
-            "valenced.api": {
-              "version": ">=1 <2"
-            },
-            "discord": {
-              "version": ">=352.2"
-            }
-          }
-        },
-        "1.4.0": {
-          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/lifawaz.reaction-logs%401.4.0.zip",
-          "sha256": "e3da47b4d722e0f822265c8696a1c30cee6ace8941ba25f160e83123f9a6d107",
-          "size": 44216,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
