@@ -2,9 +2,9 @@ import { onAnyFluxEventDispatched } from '@valenced/discord/flux'
 import { setRemoved, clearRemoved } from './native'
 import { createReactionPersistenceQueue } from './persistence'
 import {
-    applyReactionLogFluxEvent,
     copyFluxReactionPayload,
     getReactionLogFluxEvent,
+    reduceReactionLogFluxPayload,
 } from './flux-events'
 import type { FluxEventName, FluxReactionPayload } from './flux-events'
 import {
@@ -54,7 +54,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         let storageReady = false
         let stopped = false
         let eventSequence = 0
-        const pendingEvents: Array<{ event: FluxEventName; payload: FluxReactionPayload }> = []
+        const pendingEvents: FluxReactionPayload[] = []
         const persistence = createReactionPersistenceQueue({
             set: (value, replace) => jsonStorage.set(value, replace ?? true),
             get: () => jsonStorage.get(),
@@ -98,7 +98,11 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             }
         }
 
-        const processEvent = (event: FluxEventName, payload: FluxReactionPayload, persist = true) => {
+        const processEvent = (payload: FluxReactionPayload, persist = true) => {
+            const reduced = reduceReactionLogFluxPayload(state, payload)
+            if (!reduced) return
+
+            const { event, state: next } = reduced
             if (event === 'USER_UPDATE' || event === 'GUILD_MEMBER_UPDATE') {
                 if (persist && state.removalHistory.length > 0) syncNative()
                 return
@@ -110,7 +114,6 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             const beforeIds = individual
                 ? new Set(state.removalHistory.map(record => record.id))
                 : null
-            const next = applyReactionLogFluxEvent(state, event, payload)
             if (individual) {
                 const recorded = next.removalHistory.some(record => !beforeIds?.has(record.id))
                 console.debug('[Reaction Logs] Flux reaction event received', {
@@ -133,14 +136,18 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
 
             const event = getReactionLogFluxEvent(payload)
             if (!event) {
-                // One any-event listener is used deliberately: it observes the
-                // actual dispatcher action discriminator instead of relying on
-                // multiple per-event listener registrations remaining in sync.
+                const action = payload?.type
+                if (typeof action === 'string' && action.includes('REACTION')) {
+                    console.debug('[Reaction Logs] observed an unhandled reaction Flux action', {
+                        action,
+                        keys: Object.keys(payload as object),
+                    })
+                }
                 return payload
             }
 
             if (!storageReady) {
-                pendingEvents.push({ event, payload: copyFluxReactionPayload(payload) })
+                pendingEvents.push(copyFluxReactionPayload(payload))
                 if (event === 'MESSAGE_REACTION_REMOVE' || event === 'MESSAGE_REACTION_ADD') {
                     console.debug('[Reaction Logs] buffered Flux reaction event while loading persistent history', {
                         event,
@@ -151,7 +158,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
                 return payload
             }
 
-            processEvent(event, payload)
+            processEvent(payload)
             // Flux observers must return the original action so Discord's own
             // dispatcher and stores continue to receive it unchanged.
             return payload
@@ -185,7 +192,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         state = normalizeReactionStorage(stored ?? jsonStorage.cache, Date.now())
         storageReady = true
         const replay = pendingEvents.splice(0)
-        for (const item of replay) processEvent(item.event, item.payload, false)
+        for (const payload of replay) processEvent(payload, false)
 
         // Save migrated history and all events buffered during storage loading.
         persistState()
