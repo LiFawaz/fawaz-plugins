@@ -26,8 +26,11 @@ type FluxEventName =
     | 'GUILD_MEMBER_UPDATE'
 
 type IndividualReactionEvent = 'MESSAGE_REACTION_ADD' | 'MESSAGE_REACTION_REMOVE'
+// Flux's dispatcher contract requires a non-optional action discriminator.
+// The reaction kind is carried separately by burst/reactionType.
+type FluxReactionPayload = ReactionPayload & { type: string }
 
-function payloadShape(payload: ReactionPayload) {
+function payloadShape(payload: FluxReactionPayload) {
     const emoji = payload.emoji
     const reactionType = payload.reactionType ?? payload.reaction_type
     return {
@@ -56,7 +59,7 @@ function missingIdentityFields(payload: ReactionPayload): string[] {
     return missing
 }
 
-function copyFluxPayload(payload: ReactionPayload): ReactionPayload {
+function copyFluxPayload(payload: FluxReactionPayload): FluxReactionPayload {
     return {
         ...payload,
         emoji: payload.emoji ? { ...payload.emoji } : payload.emoji,
@@ -75,7 +78,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         let storageReady = false
         let stopped = false
         let eventSequence = 0
-        const pendingEvents: Array<{ event: FluxEventName; payload: ReactionPayload }> = []
+        const pendingEvents: Array<{ event: FluxEventName; payload: FluxReactionPayload }> = []
         const persistence = createReactionPersistenceQueue({
             set: (value, replace) => jsonStorage.set(value, replace ?? true),
             get: () => jsonStorage.get(),
@@ -121,7 +124,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
 
         const handleIndividualReaction = (
             eventName: IndividualReactionEvent,
-            payload: ReactionPayload,
+            payload: FluxReactionPayload,
             transition: (current: ReactionStorage, event: ReactionPayload) => ReactionStorage,
             persist: boolean,
         ) => {
@@ -144,7 +147,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             update(next, persist)
         }
 
-        const processEvent = (event: FluxEventName, payload: ReactionPayload, persist = true) => {
+        const processEvent = (event: FluxEventName, payload: FluxReactionPayload, persist = true) => {
             switch (event) {
                 case 'MESSAGE_REACTION_ADD':
                     handleIndividualReaction(event, payload, applyReactionAdd, persist)
@@ -171,7 +174,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             }
         }
 
-        const dispatch = (event: FluxEventName, payload: ReactionPayload) => {
+        const dispatch = (event: FluxEventName, payload: FluxReactionPayload) => {
             if (stopped) return payload
             if (!storageReady) {
                 pendingEvents.push({ event, payload: copyFluxPayload(payload) })
@@ -191,14 +194,14 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         // Install listeners before the first await. Otherwise a reaction removed
         // while the storage file is loading can be missed and never persisted.
         cleanup(
-            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_ADD', payload => dispatch('MESSAGE_REACTION_ADD', payload)),
-            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_REMOVE', payload => dispatch('MESSAGE_REACTION_REMOVE', payload)),
-            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_REMOVE_ALL', payload => dispatch('MESSAGE_REACTION_REMOVE_ALL', payload)),
-            onFluxEventDispatched<ReactionPayload>('MESSAGE_REACTION_REMOVE_EMOJI', payload => dispatch('MESSAGE_REACTION_REMOVE_EMOJI', payload)),
-            onFluxEventDispatched<ReactionPayload>('MESSAGE_DELETE', payload => dispatch('MESSAGE_DELETE', payload)),
-            onFluxEventDispatched<ReactionPayload>('MESSAGE_DELETE_BULK', payload => dispatch('MESSAGE_DELETE_BULK', payload)),
-            onFluxEventDispatched<ReactionPayload>('USER_UPDATE', payload => dispatch('USER_UPDATE', payload)),
-            onFluxEventDispatched<ReactionPayload>('GUILD_MEMBER_UPDATE', payload => dispatch('GUILD_MEMBER_UPDATE', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_ADD', payload => dispatch('MESSAGE_REACTION_ADD', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_REMOVE', payload => dispatch('MESSAGE_REACTION_REMOVE', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_REMOVE_ALL', payload => dispatch('MESSAGE_REACTION_REMOVE_ALL', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_REMOVE_EMOJI', payload => dispatch('MESSAGE_REACTION_REMOVE_EMOJI', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_DELETE', payload => dispatch('MESSAGE_DELETE', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_DELETE_BULK', payload => dispatch('MESSAGE_DELETE_BULK', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('USER_UPDATE', payload => dispatch('USER_UPDATE', payload)),
+            onFluxEventDispatched<FluxReactionPayload>('GUILD_MEMBER_UPDATE', payload => dispatch('GUILD_MEMBER_UPDATE', payload)),
             async () => {
                 stopped = true
                 await persistence.drain()
@@ -216,7 +219,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         } catch (error) {
             plugin.reportError('Could not load reaction history; using the last in-memory cache: ' + String(error))
             console.error('[Reaction Logs] storage read failed', error)
-            stored = jsonStorage.cache
+            stored = jsonStorage.cache as ReactionStorage | undefined
         }
         if (stopped) return
 
