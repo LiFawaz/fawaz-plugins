@@ -77,7 +77,7 @@
       "description": "Retain removed reaction users in the matching reaction popup.",
       "author": "Li Fawaz",
       "channels": {
-        "latest": "1.4.2"
+        "latest": "1.4.3"
       },
       "versions": {
         "1.2.9": {
@@ -110,6 +110,19 @@
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/lifawaz.reaction-logs%401.4.2.zip",
           "sha256": "a6463ae64fb0b5ae4add753ef275d9cc8bae2e6f1348b436d3f2b17b48f9cd9a",
           "size": 75684,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.2"
+            }
+          }
+        },
+        "1.4.3": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/lifawaz.reaction-logs%401.4.3.zip",
+          "sha256": "e69fb5bf31d6479a8edce8173e24e1085a55363f322383fb5d0d758bfcf8ec5b",
+          "size": 75823,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
