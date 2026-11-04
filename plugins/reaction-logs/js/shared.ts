@@ -1,24 +1,27 @@
 export interface EmojiPayload {
-    id?: string | null
+    id?: string | number | null
     name?: string | null
+    src?: string | null
+    displayName?: string | null
+    animated?: boolean | null
 }
 
 export interface ReactionPayload {
-    channelId?: string
-    channel_id?: string
-    messageId?: string
-    message_id?: string
-    id?: string
-    ids?: string[]
-    userId?: string
-    user_id?: string
+    channelId?: string | number
+    channel_id?: string | number
+    messageId?: string | number
+    message_id?: string | number
+    id?: string | number
+    ids?: (string | number)[]
+    userId?: string | number
+    user_id?: string | number
     emoji?: EmojiPayload
     reactionType?: number
     reaction_type?: number
     type?: number | string
     burst?: boolean
-    guildId?: string
-    guild_id?: string
+    guildId?: string | number
+    guild_id?: string | number
     optimistic?: boolean
 }
 
@@ -29,6 +32,9 @@ export interface ActiveReaction {
     userId: string
     emojiId: string | null
     emojiName: string | null
+    emojiSrc: string | null
+    emojiDisplayName: string | null
+    emojiAnimated: boolean | null
     emojiKey: string
     reactionType: number
 }
@@ -42,6 +48,9 @@ export interface RemovalRecord {
     userId: string
     emojiId: string | null
     emojiName: string | null
+    emojiSrc: string | null
+    emojiDisplayName: string | null
+    emojiAnimated: boolean | null
     emojiKey: string
     reactionType: number
     timestamp: number | null
