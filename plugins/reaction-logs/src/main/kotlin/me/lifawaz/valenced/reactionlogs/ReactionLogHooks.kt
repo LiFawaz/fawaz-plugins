@@ -479,13 +479,24 @@ internal class ReactionLogHooks(
                     }
                 }
                 if (item != null) {
-                    bindingMessageId.set(accessoryMessageId.invoke(item)?.toString())
-                    bindingChannelId.set(
-                        adapterChannelId?.let { field ->
-                            runCatching { snowflakeId(field.get(param.thisObject)) }.getOrNull()
-                        } ?: snowflakeId(readMember(param.thisObject, "channelId"))
-                            ?: snowflakeId(readMember(item, "channelId")),
-                    )
+                    val boundMessageId = accessoryMessageId.invoke(item)?.toString()
+                    val boundChannelId = adapterChannelId?.let { field ->
+                        runCatching { snowflakeId(field.get(param.thisObject)) }.getOrNull()
+                    } ?: snowflakeId(readMember(param.thisObject, "channelId"))
+                        ?: snowflakeId(readMember(item, "channelId"))
+                    bindingMessageId.set(boundMessageId)
+                    bindingChannelId.set(boundChannelId)
+                    if (boundMessageId != null) {
+                        val retainedCount = synchronized(removedUsersByKey) {
+                            removedUsersByKey.keys.count { it.startsWith("$boundMessageId|") }
+                        }
+                        if (retainedCount > 0) {
+                            XposedBridge.log(
+                                "Reaction Logs: onBindViewHolder captured retained pill(s); " +
+                                    "channelKnown=${boundChannelId != null}, markerCount=$retainedCount",
+                            )
+                        }
+                    }
                 } else {
                     bindingMessageId.remove()
                     bindingChannelId.remove()
@@ -554,14 +565,14 @@ internal class ReactionLogHooks(
                 }
                 if (markers.isEmpty()) {
                     XposedBridge.log(
-                        "Reaction Logs: setReactions bound message=$messageId channel=${channelId ?: "unknown"} " +
+                        "Reaction Logs: setReactions bound message; channelKnown=${channelId != null}, " +
                             "incoming=${incoming.size}, no retained removal markers",
                     )
                     return@hook
                 }
 
                 XposedBridge.log(
-                    "Reaction Logs: setReactions bound message=$messageId channel=${channelId ?: "unknown"} " +
+                    "Reaction Logs: setReactions bound message; channelKnown=${channelId != null}, " +
                         "incoming=${incoming.size}, retainedMarkers=${markers.size}",
                 )
                 val expanded = ArrayList<Any>(incoming.size + markers.size)
