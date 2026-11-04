@@ -450,6 +450,12 @@ export function buildNativeSnapshot(state: ReactionStorage, now = Date.now()) {
 
     for (const item of normalized.removalHistory) {
         const identityKey = item.identityKey
+        // The epoch advances on a later ADD. Keep the historical record on disk,
+        // but never reactivate it as a current removal when a later bulk clear
+        // removes that user's active-cache entry.
+        const latestEpoch = normalized.epochs[identityKey] ?? (item.epoch + 1)
+        if (latestEpoch > item.epoch + 1) continue
+
         // For old entries without channel IDs, only the pill marker can be scoped.
         const active = normalized.activeReactions.some(active =>
             (item.channelId.length === 0 || active.channelId === item.channelId) &&
