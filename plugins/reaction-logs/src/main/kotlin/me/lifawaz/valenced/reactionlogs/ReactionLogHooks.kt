@@ -973,11 +973,14 @@ internal class ReactionLogHooks(
         val constructor = itemClass.declaredConstructors.firstOrNull { candidate ->
             val types = candidate.parameterTypes
             types.size == 6 &&
+                types[0].name == "com.discord.models.user.User" &&
                 types[0].isAssignableFrom(user.javaClass) &&
                 types[1] == Long::class.javaPrimitiveType &&
                 types[2] == Long::class.javaPrimitiveType &&
+                types[3].name == "com.discord.api.message.reaction.MessageReactionEmoji" &&
                 types[3].isAssignableFrom(emoji.javaClass) &&
                 types[4] == Boolean::class.javaPrimitiveType &&
+                types[5].name == "com.discord.models.member.GuildMember" &&
                 (guildMember == null || types[5].isAssignableFrom(guildMember.javaClass))
         } ?: return@runCatching null
         constructor.isAccessible = true
