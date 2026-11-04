@@ -74,11 +74,13 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             // Capture this exact state now; the queue snapshots it again before
             // the first await so rapid Flux events cannot overwrite each other.
             const snapshot = normalizeReactionStorage(state, Date.now())
-            persistence.enqueue(snapshot).then(() => {
+            void persistence.enqueue(snapshot).then(() => {
                 console.debug('[Reaction Logs] storage write verified', {
                     removals: snapshot.removalHistory.length,
                     active: snapshot.activeReactions.length,
                 })
+            }, () => {
+                // The queue's error callback reports the failed read-back.
             })
         }
 
