@@ -904,9 +904,20 @@ internal class ReactionLogHooks(
         val previousItems = (readMember(lastPopupModel, "reactionItems") as? List<*>)
             ?.filterNotNull()
             .orEmpty()
+        val selectedApiKey = entryApiKey(selected)
         val items = ArrayList<Any>(previousItems.size + history.size)
-        items.addAll(previousItems)
-        val presentKeys = previousItems.mapNotNull { item ->
+        for (item in previousItems) {
+            val reaction = readMember(item, "reaction")
+            val emoji = reaction?.let { readMember(it, "emoji") }
+            val shouldSelect = emoji != null && selectedApiKey != null &&
+                emojiMatchesApiKey(emoji, selectedApiKey)
+            val wasSelected = readMember(item, "isSelected") == true
+            val replacement = if (reaction != null && shouldSelect != wasSelected) {
+                createReactionEmojiTabCopy(item, reaction, shouldSelect)
+            } else null
+            items.add(replacement ?: item)
+        }
+        val presentKeys = items.mapNotNull { item ->
             val reaction = readMember(item, "reaction") ?: return@mapNotNull null
             val emoji = readMember(reaction, "emoji") ?: return@mapNotNull null
             emojiApiKey(emoji)
