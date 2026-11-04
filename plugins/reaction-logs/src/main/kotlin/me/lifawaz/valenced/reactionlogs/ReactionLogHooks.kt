@@ -411,6 +411,13 @@ internal class ReactionLogHooks(
             .firstOrNull { it.name == "channelId" }
             ?.apply { isAccessible = true }
 
+        val setReactions = dexFinder.findMethod {
+            matcher {
+                declaredClass(SHORTCUTS_FLEXBOX)
+                usingEqStrings("reactions", "addNewReactionAccessibilityLabel")
+            }
+        } ?: error("ShortcutsFlexbox.setReactions not found")
+
         var missingBindingLogged = false
         XposedBridge.log(
             "Reaction Logs: pill hooks resolved bind=${onBindViewHolder.toGenericString()}, " +
@@ -418,13 +425,6 @@ internal class ReactionLogHooks(
                 "itemFields=${adapterItemFields.joinToString { it.name }}, " +
                 "channelField=${adapterChannelId?.name ?: "property fallback"}",
         )
-
-        val setReactions = dexFinder.findMethod {
-            matcher {
-                declaredClass(SHORTCUTS_FLEXBOX)
-                usingEqStrings("reactions", "addNewReactionAccessibilityLabel")
-            }
-        } ?: error("ShortcutsFlexbox.setReactions not found")
 
         unhooks += onBindViewHolder.hook(
             before = { param ->
