@@ -46,6 +46,33 @@ describe('Reaction Logs durable storage queue', () => {
         expect(errors).toHaveLength(0)
     })
 
+    test('a verified REMOVE snapshot is still present after a storage reload', async () => {
+        let disk = structuredClone(DefaultStorage)
+        const storage = {
+            async set(value: ReactionStorage) {
+                disk = structuredClone(value)
+            },
+            async get() {
+                return structuredClone(disk)
+            },
+        }
+        const queue = createReactionPersistenceQueue(storage, () => {
+            throw new Error('unexpected persistence failure')
+        })
+
+        await queue.enqueue(snapshot('message-persisted'))
+        await queue.drain()
+        const reloaded = await storage.get()
+
+        expect(reloaded.removalHistory).toHaveLength(1)
+        expect(reloaded.removalHistory[0]).toMatchObject({
+            channelId: 'channel-1',
+            messageId: 'message-persisted',
+            userId: 'user-1',
+            emojiKey: 'unicode:heart',
+        })
+    })
+
     test('detects a filesystem write failure swallowed by JsonStorage.set', async () => {
         const disk = structuredClone(DefaultStorage)
         const errors: Array<{ error: unknown; sequence: number }> = []
