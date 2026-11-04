@@ -18,7 +18,6 @@ export interface ReactionPayload {
     emoji?: EmojiPayload
     reactionType?: number | string
     reaction_type?: number | string
-    type?: number | string
     burst?: boolean
     guildId?: string | number
     guild_id?: string | number
