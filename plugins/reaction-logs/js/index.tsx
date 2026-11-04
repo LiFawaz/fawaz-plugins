@@ -9,9 +9,26 @@ import {
     applyRemoveEmoji,
     buildNativeSnapshot,
     normalizeReactionStorage,
+    reactionIdentityFromPayload,
 } from './state'
 import { DefaultStorage } from './shared'
 import type { ReactionPayload, ReactionStorage } from './shared'
+
+type ReactionEventName = 'MESSAGE_REACTION_ADD' | 'MESSAGE_REACTION_REMOVE'
+
+function payloadShape(payload: ReactionPayload) {
+    const emoji = payload.emoji
+    return {
+        channel: payload.channelId != null || payload.channel_id != null,
+        message: payload.messageId != null || payload.message_id != null,
+        user: payload.userId != null || payload.user_id != null,
+        emoji: emoji != null,
+        emojiId: emoji?.id != null,
+        emojiName: emoji?.name != null,
+        reactionType: typeof payload.reactionType === 'number' || typeof payload.reaction_type === 'number',
+        guild: payload.guildId != null || payload.guild_id != null,
+    }
+}
 
 export default plugin<{ jsonStorage: ReactionStorage }>({
     jsonStorage: {
@@ -19,24 +36,49 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         default: DefaultStorage,
     },
 
-    start({ cleanup, plugin, jsonStorage }) {
-        let state = normalizeReactionStorage(jsonStorage.cache, Date.now())
-        let persistQueue = Promise.resolve()
+    async start({ cleanup, plugin, jsonStorage }) {
+        // Await the storage read explicitly. A plugin start can happen before the
+        // async JSON document has populated cache, even with load:true configured.
+        const stored = await jsonStorage.get()
+        let state = normalizeReactionStorage(stored ?? jsonStorage.cache, Date.now())
+        let persistQueue: Promise<void> = Promise.resolve()
+        let persistSequence = 0
+        let eventSequence = 0
 
         const persistState = () => {
+            const sequence = ++persistSequence
+            // Capture this exact state now; never serialize a later mutable state
+            // from inside the queued callback.
             const snapshot = normalizeReactionStorage(state, Date.now())
+            const removalCount = snapshot.removalHistory.length
+            const activeCount = snapshot.activeReactions.length
             persistQueue = persistQueue
-                .then(() => jsonStorage.set(snapshot, true))
+                .then(async () => {
+                    await jsonStorage.set(snapshot, true)
+                    console.debug('[Reaction Logs] storage write completed', {
+                        sequence,
+                        removals: removalCount,
+                        active: activeCount,
+                    })
+                })
                 .catch(error => {
-                    plugin.reportError('Failed to save reaction history: ' + String(error))
+                    plugin.reportError('Failed to persist reaction history: ' + String(error))
+                    console.error('[Reaction Logs] storage write failed', { sequence, error })
                 })
         }
 
         const syncNative = () => {
             try {
-                setRemoved(JSON.stringify(buildNativeSnapshot(state)))
+                const snapshot = buildNativeSnapshot(state)
+                setRemoved(JSON.stringify(snapshot))
+                console.debug('[Reaction Logs] native state synchronized', {
+                    removals: snapshot.removalHistory.length,
+                    active: snapshot.activeReactions.length,
+                    currentRemovedPills: snapshot.activeRemovals.length,
+                })
             } catch (error) {
-                plugin.reportError('Failed to refresh reaction popup records: ' + String(error))
+                plugin.reportError('Failed to synchronize native reaction state: ' + String(error))
+                console.error('[Reaction Logs] native synchronization failed', error)
             }
         }
 
@@ -46,23 +88,40 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             syncNative()
         }
 
+        const handleIndividualReaction = (
+            eventName: ReactionEventName,
+            payload: ReactionPayload,
+            transition: (current: ReactionStorage, event: ReactionPayload) => ReactionStorage,
+        ) => {
+            const sequence = ++eventSequence
+            const identity = reactionIdentityFromPayload(payload)
+            const before = state.removalHistory.length
+            const next = transition(state, payload)
+            const recorded = next.removalHistory.length > before
+            console.debug('[Reaction Logs] Flux reaction event received', {
+                event: eventName,
+                sequence,
+                identityValid: identity != null,
+                fields: payloadShape(payload),
+                reactionType: identity?.reactionType ?? null,
+                removalRecorded: recorded,
+                removalCount: next.removalHistory.length,
+            })
+            update(next)
+            // Valenced's Flux patch contract uses the returned payload to allow
+            // the original Discord dispatcher to continue processing the event.
+            return payload
+        }
+
         cleanup(
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_REACTION_ADD',
-                payload => {
-                    update(applyReactionAdd(state, payload))
-                    // Let Discord update its actual active reactor list and count.
-                    return payload
-                },
+                payload => handleIndividualReaction('MESSAGE_REACTION_ADD', payload, applyReactionAdd),
             ),
 
             onFluxEventDispatched<ReactionPayload>(
                 'MESSAGE_REACTION_REMOVE',
-                payload => {
-                    update(applyReactionRemove(state, payload))
-                    // The removed user is retained by our popup model patch, not by blocking Discord.
-                    return payload
-                },
+                payload => handleIndividualReaction('MESSAGE_REACTION_REMOVE', payload, applyReactionRemove),
             ),
 
             onFluxEventDispatched<ReactionPayload>(
@@ -89,8 +148,6 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
                 },
             ),
 
-            // Discord can populate or refresh the cached profile after the removal
-            // event. Re-run the open popup model patch when that happens.
             onFluxEventDispatched<ReactionPayload>(
                 'USER_UPDATE',
                 payload => {
@@ -116,15 +173,23 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             ),
 
             () => {
+                // This clears only native in-memory view bindings. Persistent
+                // JSON history remains untouched and is restored on the next start.
                 try {
                     clearRemoved()
                 } catch (error) {
-                    plugin.reportError('Could not clear reaction highlights: ' + String(error))
+                    plugin.reportError('Could not clear native reaction bindings: ' + String(error))
                 }
             },
         )
 
-        // Restore retained removal history after a plugin reload and prune expired records.
-        update(state)
+        // Restore saved state (including emoji render data), prune expiry, and
+        // synchronize native hooks even when the popup has never been opened.
+        persistState()
+        syncNative()
+        console.debug('[Reaction Logs] started', {
+            removals: state.removalHistory.length,
+            active: state.activeReactions.length,
+        })
     },
 })
