@@ -368,6 +368,28 @@ describe('Reaction Logs event state', () => {
         expect(Object.keys(current.epochs)).toHaveLength(MAX_ACTIVE_REACTIONS)
     })
 
+    test('real Gateway snake_case REMOVE fields create a burst record', () => {
+        const current = applyReactionRemove(state(), {
+            user_id: 404,
+            channel_id: 202,
+            message_id: 101,
+            guild_id: 303,
+            emoji: { id: null, name: 'wave', animated: false },
+            burst: true,
+            type: 'MESSAGE_REACTION_REMOVE',
+        }, 52)
+
+        expect(current.removalHistory).toHaveLength(1)
+        expect(current.removalHistory[0]).toMatchObject({
+            guildId: '303',
+            channelId: '202',
+            messageId: '101',
+            userId: '404',
+            emojiKey: 'unicode:wave',
+            reactionType: 1,
+        })
+    })
+
     test('Gateway burst flag wins over generic type aliases', () => {
         const current = applyReactionRemove(state(), base({
             type: 'MESSAGE_REACTION_REMOVE',
