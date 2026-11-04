@@ -66,10 +66,8 @@ jobs:
       - name: Run reaction state regression tests
         run: bun test tests/reaction-state.test.ts
 
-      - name: Check Reaction Logs source formatting and syntax
-        run: |
-          node --check plugins/reaction-logs/js/native.ts >/dev/null 2>&1 || true
-          bunx tsc --noEmit --project plugins/reaction-logs/tsconfig.json
+      - name: Type-check Reaction Logs
+        run: bunx tsc --noEmit --project plugins/reaction-logs/tsconfig.json
 
       - name: Build Reaction Logs only
         run: gradle --no-daemon packageReactionLogs
