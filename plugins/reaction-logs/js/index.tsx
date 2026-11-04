@@ -1,34 +1,19 @@
-import { onFluxEventDispatched } from '@valenced/discord/flux'
+import { onAnyFluxEventDispatched } from '@valenced/discord/flux'
 import { setRemoved, clearRemoved } from './native'
 import { createReactionPersistenceQueue } from './persistence'
 import {
-    applyBulkMessageDelete,
-    applyMessageDelete,
-    applyReactionAdd,
-    applyReactionRemove,
-    applyRemoveAll,
-    applyRemoveEmoji,
+    applyReactionLogFluxEvent,
+    copyFluxReactionPayload,
+    getReactionLogFluxEvent,
+} from './flux-events'
+import type { FluxEventName, FluxReactionPayload } from './flux-events'
+import {
     buildNativeSnapshot,
     normalizeReactionStorage,
     reactionIdentityFromPayload,
 } from './state'
 import { DefaultStorage } from './shared'
-import type { ReactionPayload, ReactionStorage } from './shared'
-
-type FluxEventName =
-    | 'MESSAGE_REACTION_ADD'
-    | 'MESSAGE_REACTION_REMOVE'
-    | 'MESSAGE_REACTION_REMOVE_ALL'
-    | 'MESSAGE_REACTION_REMOVE_EMOJI'
-    | 'MESSAGE_DELETE'
-    | 'MESSAGE_DELETE_BULK'
-    | 'USER_UPDATE'
-    | 'GUILD_MEMBER_UPDATE'
-
-type IndividualReactionEvent = 'MESSAGE_REACTION_ADD' | 'MESSAGE_REACTION_REMOVE'
-// Flux's dispatcher contract requires a non-optional action discriminator.
-// The reaction kind is carried separately by burst/reactionType.
-type FluxReactionPayload = ReactionPayload & { type: string }
+import type { ReactionStorage } from './shared'
 
 function payloadShape(payload: FluxReactionPayload) {
     const emoji = payload.emoji
@@ -40,7 +25,6 @@ function payloadShape(payload: FluxReactionPayload) {
         emoji: emoji != null,
         emojiId: emoji?.id != null,
         emojiName: emoji?.name != null,
-        // payload.type is Valenced/Discord's Flux action name, not the reaction kind.
         reactionType: reactionType ?? (payload.burst === true ? 'burst' : payload.burst === false ? 'normal' : null),
         burst: payload.burst ?? null,
         guild: payload.guildId != null || payload.guild_id != null,
@@ -49,7 +33,7 @@ function payloadShape(payload: FluxReactionPayload) {
     }
 }
 
-function missingIdentityFields(payload: ReactionPayload): string[] {
+function missingIdentityFields(payload: FluxReactionPayload): string[] {
     const missing: string[] = []
     if (payload.channelId == null && payload.channel_id == null) missing.push('channelId/channel_id')
     if (payload.messageId == null && payload.message_id == null) missing.push('messageId/message_id')
@@ -57,14 +41,6 @@ function missingIdentityFields(payload: ReactionPayload): string[] {
     if (payload.emoji == null) missing.push('emoji')
     else if (payload.emoji.id == null && payload.emoji.name == null) missing.push('emoji.id/emoji.name')
     return missing
-}
-
-function copyFluxPayload(payload: FluxReactionPayload): FluxReactionPayload {
-    return {
-        ...payload,
-        emoji: payload.emoji ? { ...payload.emoji } : payload.emoji,
-        ids: Array.isArray(payload.ids) ? [...payload.ids] : payload.ids,
-    }
 }
 
 export default plugin<{ jsonStorage: ReactionStorage }>({
@@ -122,86 +98,69 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
             }
         }
 
-        const handleIndividualReaction = (
-            eventName: IndividualReactionEvent,
-            payload: FluxReactionPayload,
-            transition: (current: ReactionStorage, event: ReactionPayload) => ReactionStorage,
-            persist: boolean,
-        ) => {
-            const sequence = ++eventSequence
-            const identity = reactionIdentityFromPayload(payload)
-            const beforeIds = new Set(state.removalHistory.map(record => record.id))
-            const next = transition(state, payload)
-            const recorded = next.removalHistory.some(record => !beforeIds.has(record.id))
-            console.debug('[Reaction Logs] Flux reaction event received', {
-                event: eventName,
-                sequence,
-                deferredUntilStorageLoad: !storageReady,
-                identityValid: identity != null,
-                missingIdentityFields: identity ? [] : missingIdentityFields(payload),
-                fields: payloadShape(payload),
-                reactionType: identity?.reactionType ?? null,
-                removalRecorded: recorded,
-                removalCount: next.removalHistory.length,
-            })
+        const processEvent = (event: FluxEventName, payload: FluxReactionPayload, persist = true) => {
+            if (event === 'USER_UPDATE' || event === 'GUILD_MEMBER_UPDATE') {
+                if (persist && state.removalHistory.length > 0) syncNative()
+                return
+            }
+
+            const individual = event === 'MESSAGE_REACTION_ADD' || event === 'MESSAGE_REACTION_REMOVE'
+            const sequence = individual ? ++eventSequence : eventSequence
+            const identity = individual ? reactionIdentityFromPayload(payload) : null
+            const beforeIds = individual
+                ? new Set(state.removalHistory.map(record => record.id))
+                : null
+            const next = applyReactionLogFluxEvent(state, event, payload)
+            if (individual) {
+                const recorded = next.removalHistory.some(record => !beforeIds?.has(record.id))
+                console.debug('[Reaction Logs] Flux reaction event received', {
+                    event,
+                    sequence,
+                    deferredUntilStorageLoad: !storageReady,
+                    identityValid: identity != null,
+                    missingIdentityFields: identity ? [] : missingIdentityFields(payload),
+                    fields: payloadShape(payload),
+                    reactionType: identity?.reactionType ?? null,
+                    removalRecorded: event === 'MESSAGE_REACTION_REMOVE' && recorded,
+                    removalCount: next.removalHistory.length,
+                })
+            }
             update(next, persist)
         }
 
-        const processEvent = (event: FluxEventName, payload: FluxReactionPayload, persist = true) => {
-            switch (event) {
-                case 'MESSAGE_REACTION_ADD':
-                    handleIndividualReaction(event, payload, applyReactionAdd, persist)
-                    break
-                case 'MESSAGE_REACTION_REMOVE':
-                    handleIndividualReaction(event, payload, applyReactionRemove, persist)
-                    break
-                case 'MESSAGE_REACTION_REMOVE_ALL':
-                    update(applyRemoveAll(state, payload), persist)
-                    break
-                case 'MESSAGE_REACTION_REMOVE_EMOJI':
-                    update(applyRemoveEmoji(state, payload), persist)
-                    break
-                case 'MESSAGE_DELETE':
-                    update(applyMessageDelete(state, payload), persist)
-                    break
-                case 'MESSAGE_DELETE_BULK':
-                    update(applyBulkMessageDelete(state, payload), persist)
-                    break
-                case 'USER_UPDATE':
-                case 'GUILD_MEMBER_UPDATE':
-                    if (persist && state.removalHistory.length > 0) syncNative()
-                    break
-            }
-        }
-
-        const dispatch = (event: FluxEventName, payload: FluxReactionPayload) => {
+        const dispatch = (payload: FluxReactionPayload) => {
             if (stopped) return payload
-            if (!storageReady) {
-                pendingEvents.push({ event, payload: copyFluxPayload(payload) })
-                console.debug('[Reaction Logs] buffered Flux event while loading persistent history', {
-                    event,
-                    buffered: pendingEvents.length,
-                    fields: payloadShape(payload),
-                })
+
+            const event = getReactionLogFluxEvent(payload)
+            if (!event) {
+                // One any-event listener is used deliberately: it observes the
+                // actual dispatcher action discriminator instead of relying on
+                // multiple per-event listener registrations remaining in sync.
                 return payload
             }
+
+            if (!storageReady) {
+                pendingEvents.push({ event, payload: copyFluxReactionPayload(payload) })
+                if (event === 'MESSAGE_REACTION_REMOVE' || event === 'MESSAGE_REACTION_ADD') {
+                    console.debug('[Reaction Logs] buffered Flux reaction event while loading persistent history', {
+                        event,
+                        buffered: pendingEvents.length,
+                        fields: payloadShape(payload),
+                    })
+                }
+                return payload
+            }
+
             processEvent(event, payload)
-            // Returning the original payload is required for Flux to continue
-            // dispatching the action to Discord's own stores.
+            // Flux observers must return the original action so Discord's own
+            // dispatcher and stores continue to receive it unchanged.
             return payload
         }
 
-        // Install listeners before the first await. Otherwise a reaction removed
-        // while the storage file is loading can be missed and never persisted.
+        // Register before the first await so early removals are captured.
+        // onAnyFluxEventDispatched exposes the raw Flux action in payload.type.
         cleanup(
-            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_ADD', payload => dispatch('MESSAGE_REACTION_ADD', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_REMOVE', payload => dispatch('MESSAGE_REACTION_REMOVE', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_REMOVE_ALL', payload => dispatch('MESSAGE_REACTION_REMOVE_ALL', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_REACTION_REMOVE_EMOJI', payload => dispatch('MESSAGE_REACTION_REMOVE_EMOJI', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_DELETE', payload => dispatch('MESSAGE_DELETE', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('MESSAGE_DELETE_BULK', payload => dispatch('MESSAGE_DELETE_BULK', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('USER_UPDATE', payload => dispatch('USER_UPDATE', payload)),
-            onFluxEventDispatched<FluxReactionPayload>('GUILD_MEMBER_UPDATE', payload => dispatch('GUILD_MEMBER_UPDATE', payload)),
+            onAnyFluxEventDispatched(payload => dispatch(payload as FluxReactionPayload)),
             async () => {
                 stopped = true
                 await persistence.drain()
@@ -228,8 +187,7 @@ export default plugin<{ jsonStorage: ReactionStorage }>({
         const replay = pendingEvents.splice(0)
         for (const item of replay) processEvent(item.event, item.payload, false)
 
-        // Persist the loaded/migrated state plus every event received during load,
-        // then restore the Android hooks and UI state in one synchronization pass.
+        // Save migrated history and all events buffered during storage loading.
         persistState()
         syncNative()
         console.debug('[Reaction Logs] started', {
