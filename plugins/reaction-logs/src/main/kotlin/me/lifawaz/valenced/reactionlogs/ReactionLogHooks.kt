@@ -949,7 +949,7 @@ internal class ReactionLogHooks(
             targetApiKey != null && entryMatchesApiKey(it, targetApiKey)
         } ?: uniqueEntries.first()
         popupTargetApiKey = targetApiKey ?: entryApiKey(selected)
-        popupTargetReactionType = selected.reactionType
+        popupTargetReactionType = popupTargetReactionType ?: selected.reactionType
 
         // Preserve other live emoji tabs from the last original model, but select
         // the requested target and discard the old user list for the previous tab.
@@ -1049,8 +1049,15 @@ internal class ReactionLogHooks(
             val widget = lastPopupWidget?.get() ?: return@hook
             if (readMember(widget, "modelProvider") !== param.thisObject) return@hook
             val target = param.args.getOrNull(0) as? String ?: return@hook
+            val tappedTarget = popupTargetApiKey
+            val tappedType = popupTargetReactionType
             popupTargetApiKey = target
-            popupTargetReactionType = null
+            val sameTappedEmoji = tappedTarget != null && (
+                tappedTarget == target ||
+                    tappedTarget.endsWith(":$target") ||
+                    target.endsWith(":$tappedTarget")
+                )
+            popupTargetReactionType = if (sameTappedEmoji) tappedType else null
 
             if (hasPositiveReactionTab(lastPopupModel, target)) return@hook
             if (!hasRemovalForTarget(widget, target, dexFinder.classLoader)) return@hook
@@ -1188,6 +1195,11 @@ internal class ReactionLogHooks(
             } -> requestedKey
             else -> previouslySelectedApiKey
         }
+        val selectedTabChanged = targetEntry != null && (
+            previouslySelectedEmoji == null ||
+                selectedApiKey == null ||
+                !emojiMatchesApiKey(previouslySelectedEmoji, selectedApiKey)
+            )
 
         val reactionItems = ArrayList<Any>(baseReactionItems.size + historyForMessage.size)
         val presentApiKeys = LinkedHashSet<String>()
@@ -1253,10 +1265,11 @@ internal class ReactionLogHooks(
         val selectedEmojiKey = emojiKey(emoji) ?: return clearPopupSelection(model)
         // The popup is scoped by message + emoji, not by normal/burst type.
         // Retain a type only for row-binding bookkeeping; merge both types below.
-        val selectedReactionType = historyForMessage
-            .filter { it.emojiKey == selectedEmojiKey }
-            .maxByOrNull { it.timestamp ?: 0L }
-            ?.reactionType
+        val selectedReactionType = popupTargetReactionType
+            ?: historyForMessage
+                .filter { it.emojiKey == selectedEmojiKey }
+                .maxByOrNull { it.timestamp ?: 0L }
+                ?.reactionType
             ?: reactionType(selectedReaction, selectedItem)
 
         detailsGuildId = guildId
@@ -1298,7 +1311,11 @@ internal class ReactionLogHooks(
 
         // When a newly inserted zero-count tab is selected, the original userItems
         // belong to the previously selected emoji and must not leak into this tab.
-        val effectiveOriginalItems = if (insertedSelectedTab) emptyList<Any>() else originalItems
+        val effectiveOriginalItems = if (insertedSelectedTab || selectedTabChanged) {
+            emptyList<Any>()
+        } else {
+            originalItems
+        }
         val existingUsers = effectiveOriginalItems.mapNotNull(::extractUserId).toMutableSet()
         val output = ArrayList<Any>(effectiveOriginalItems.size + historyForSelection.size + 4)
         effectiveOriginalItems.filterNotNullTo(output)
