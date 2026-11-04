@@ -121,8 +121,8 @@
         },
         "1.4.3": {
           "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/lifawaz.reaction-logs%401.4.3.zip",
-          "sha256": "e69fb5bf31d6479a8edce8173e24e1085a55363f322383fb5d0d758bfcf8ec5b",
-          "size": 75823,
+          "sha256": "074bc830a16e1bbdd6b68b2495b2ba536f63d20624ea0c040add645f656ce24b",
+          "size": 75895,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
