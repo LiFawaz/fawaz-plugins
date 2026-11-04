@@ -74,7 +74,7 @@ function SettingsComponent({ api }) {
   const stored = Object.assign({}, DEFAULTS, api.jsonStorage.use() || {});
   const folderName = typeof stored.folderName === 'string' && stored.folderName
     ? stored.folderName
-    : 'Not selected — Android Files will open at its default location';
+    : 'Not selected — choose a folder before downloading';
   const Design = valenced.discord.design.Design;
   const h = valenced.react.React.createElement;
 
@@ -83,7 +83,7 @@ function SettingsComponent({ api }) {
       const name = await callNativeMethod(PLUGIN_ID + '.chooseFolder', []);
       if (!name) return;
       await api.jsonStorage.set({ folderName: name });
-      alert('Default folder saved: ' + name + '\n\nThe Android file picker will open there next time.');
+      alert('Default save folder set to: ' + name + '\n\nVoice messages will now download directly into this folder.');
     } catch (error) {
       alert('Could not choose an Android folder:\n\n' + asError(error));
     }
@@ -98,10 +98,10 @@ function SettingsComponent({ api }) {
       })
     ),
     h(Design.Text, { variant: 'text-sm/normal' },
-      'Every download opens Android Files. Choose Create new file to pick a folder and filename, or Choose existing file to replace an audio file after confirmation. The optional default folder is remembered and used as the picker starting location.'
+      'Choose a folder once. After that, Download Voice Message saves directly into this folder without opening another picker.'
     ),
     h(Design.Text, { variant: 'text-sm/normal' },
-      'Create new file never overwrites an existing file. Android adds a number if the same filename already exists.'
+      'The plugin creates a new audio file for each voice message. It does not replace existing files.'
     )
   );
 }
@@ -149,20 +149,14 @@ const options = plugin({
                 try {
                   actionCreators.hideActionSheet();
 
-                  const result = await callNativeMethod(PLUGIN_ID + '.saveWithPicker', [
+                  const result = await callNativeMethod(PLUGIN_ID + '.saveToFolder', [
                     attachment.url || attachment.proxy_url,
                     suggestedName,
                     attachment.content_type
                   ]);
 
-                  if (!result || result.cancelled) {
-                    alert('Download cancelled. No file was saved.');
-                    return;
-                  }
-
-                  const filename = typeof result.filename === 'string' ? result.filename : suggestedName;
-                  const mode = result.replaced ? 'Existing file replaced' : 'New file created';
-                  alert('Voice message saved successfully.\n\n' + mode + ': ' + filename);
+                  const filename = result && typeof result.filename === 'string' ? result.filename : suggestedName;
+                  alert('Voice message downloaded to your saved folder: ' + filename);
                 } catch (error) {
                   const detail = asError(error);
                   pluginApi.reportError('Voice message download failed: ' + detail);
