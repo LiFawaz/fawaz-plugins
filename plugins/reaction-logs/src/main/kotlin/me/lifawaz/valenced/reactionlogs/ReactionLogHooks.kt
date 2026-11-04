@@ -140,7 +140,11 @@ internal class ReactionLogHooks(
     private val unhooks = mutableListOf<XC_MethodHook.Unhook>()
 
     init {
-        hookReactionPills(dexFinder)
+        // One Discord UI hook failing must not prevent the remaining native
+        // bridge methods and popup hooks from registering.
+        runCatching { hookReactionPills(dexFinder) }.onFailure {
+            XposedBridge.log("Reaction Logs: reaction-pill hooks unavailable: $it")
+        }
         runCatching { hookReactionUserRows(dexFinder) }.onFailure {
             XposedBridge.log("Reaction Logs: reaction-user row hook unavailable: $it")
         }
