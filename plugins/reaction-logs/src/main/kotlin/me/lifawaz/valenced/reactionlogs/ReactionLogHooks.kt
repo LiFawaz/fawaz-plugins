@@ -34,6 +34,15 @@ private const val MANAGE_REACTIONS_MODEL_PROVIDER =
     "com.discord.widgets.chat.managereactions.ManageReactionsModelProvider"
 private const val MANAGE_REACTIONS_WIDGET =
     "com.discord.widgets.chat.managereactions.WidgetManageReactions"
+private const val MANAGE_REACTIONS_MODEL_PROVIDER =
+    "com.discord.widgets.chat.managereactions.ManageReactionsModelProvider"
+private const val MANAGE_REACTIONS_MODEL =
+    "com.discord.widgets.chat.managereactions.ManageReactionsModel"
+private const val MANAGE_REACTIONS_EMOJI_ITEM =
+    "com.discord.widgets.chat.managereactions.ManageReactionsEmojisAdapter\$ReactionEmojiItem"
+private const val MESSAGE_REACTION_MODEL =
+    "com.discord.chat.bridge.reaction.MessageReaction"
+private const val EXTRA_EMOJI_KEY = "com.discord.intent.extra.EXTRA_EMOJI_KEY"
 private const val REACTION_USER_ITEM =
     "com.discord.widgets.chat.managereactions.ManageReactionsResultsAdapter\$ReactionUserItem"
 private const val MG_RECYCLER_VIEW_HOLDER =
@@ -113,6 +122,7 @@ internal class ReactionLogHooks(
     private var popupRetryKey: String? = null
     private var popupRetryAttempts = 0
     private var popupRetryRunnable: Runnable? = null
+    @Volatile private var popupTargetApiKey: String? = null
     // Keep reaction data models, not Android views: ShortcutsFlexbox recycles its
     // ten ReactionView children for different emoji during every setReactions call.
     private val reactionTemplates = LinkedHashMap<ReactionModelKey, Any>()
