@@ -126,7 +126,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pool/lifawaz.reaction-logs@1.4.0.zip index.json
+          git add pool/lifawaz.reaction-logs@*.zip index.json
           git diff --cached --quiet || git commit -m "Publish Reaction Logs 1.4.0 to feature branch"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
@@ -136,7 +136,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: reaction-logs-1.4.0-install-zip
-          path: build/dist/lifawaz.reaction-logs@1.4.0.zip
+          name: reaction-logs-install-zip
+          path: build/dist/lifawaz.reaction-logs@*.zip
           if-no-files-found: error
           retention-days: 14
