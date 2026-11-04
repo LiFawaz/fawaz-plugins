@@ -113,7 +113,7 @@ jobs:
               "size": len(data),
               "dependencies": manifest.get("dependencies", {}),
           }
-          index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+          index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
           print(f"Prepared {destination} ({len(data)} bytes)")
           PY
 
