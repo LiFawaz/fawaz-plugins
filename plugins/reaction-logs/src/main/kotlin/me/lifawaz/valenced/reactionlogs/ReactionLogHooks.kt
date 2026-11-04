@@ -907,8 +907,18 @@ internal class ReactionLogHooks(
         }
         if (history.isEmpty()) return null
 
-        // Preserve any other live emoji tabs from the last original model, but
-        // discard its user list because it belongs to the previous selected tab.
+        val uniqueEntries = history.groupBy { it.emojiKey }
+            .values
+            .mapNotNull { group -> group.maxByOrNull { it.timestamp ?: 0L } }
+            .sortedByDescending { it.timestamp ?: 0L }
+        val selected = uniqueEntries.firstOrNull {
+            targetApiKey != null && entryMatchesApiKey(it, targetApiKey)
+        } ?: uniqueEntries.first()
+        popupTargetApiKey = targetApiKey ?: entryApiKey(selected)
+        popupTargetReactionType = selected.reactionType
+
+        // Preserve other live emoji tabs from the last original model, but select
+        // the requested target and discard the old user list for the previous tab.
         val previousItems = (readMember(lastPopupModel, "reactionItems") as? List<*>)
             ?.filterNotNull()
             .orEmpty()
@@ -930,16 +940,6 @@ internal class ReactionLogHooks(
             val emoji = readMember(reaction, "emoji") ?: return@mapNotNull null
             emojiApiKey(emoji)
         }.toMutableSet()
-
-        val uniqueEntries = history.groupBy { it.emojiKey }
-            .values
-            .mapNotNull { group -> group.maxByOrNull { it.timestamp ?: 0L } }
-            .sortedByDescending { it.timestamp ?: 0L }
-        val selected = uniqueEntries.firstOrNull {
-            targetApiKey != null && entryMatchesApiKey(it, targetApiKey)
-        } ?: uniqueEntries.first()
-        popupTargetApiKey = targetApiKey ?: entryApiKey(selected)
-        popupTargetReactionType = selected.reactionType
 
         for (entry in uniqueEntries) {
             val apiKey = entryApiKey(entry) ?: continue
