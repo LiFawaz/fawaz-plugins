@@ -17,8 +17,8 @@ type ReactionIdentity = Omit<ActiveReaction, 'reactionType'> & {
 }
 
 const nonEmpty = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null
-    const result = value.trim()
+    if (typeof value !== 'string' && typeof value !== 'number') return null
+    const result = String(value).trim()
     return result.length > 0 && result !== 'null' ? result : null
 }
 
@@ -50,7 +50,7 @@ function reactionType(payload: ReactionPayload): number {
     return payload.burst === true ? 1 : 0
 }
 
-function identityFromPayload(payload: ReactionPayload): ReactionIdentity | null {
+export function reactionIdentityFromPayload(payload: ReactionPayload): ReactionIdentity | null {
     const channelId = getString(payload, 'channelId', 'channel_id')
     const messageId = getString(payload, 'messageId', 'message_id')
     const userId = getString(payload, 'userId', 'user_id')
@@ -63,6 +63,9 @@ function identityFromPayload(payload: ReactionPayload): ReactionIdentity | null 
 
     const emojiId = nonEmpty(payload.emoji?.id)
     const emojiName = nonEmpty(payload.emoji?.name)
+    const emojiSrc = nonEmpty(payload.emoji?.src)
+    const emojiDisplayName = nonEmpty(payload.emoji?.displayName) ?? emojiName
+    const emojiAnimated = typeof payload.emoji?.animated === 'boolean' ? payload.emoji.animated : null
     const type = reactionType(payload)
     // Channel/message IDs are globally unique; guildId is optional in some
     // Flux payloads, so it is retained as metadata but excluded from the key.
@@ -82,6 +85,9 @@ function identityFromPayload(payload: ReactionPayload): ReactionIdentity | null 
         userId,
         emojiId,
         emojiName,
+        emojiSrc,
+        emojiDisplayName,
+        emojiAnimated,
         emojiKey,
         reactionType: type,
         pillKey: `${messageId}|${emojiKey}|${type}`,
@@ -97,6 +103,9 @@ const asActiveReaction = (identity: ReactionIdentity): ActiveReaction => ({
     userId: identity.userId,
     emojiId: identity.emojiId,
     emojiName: identity.emojiName,
+    emojiSrc: identity.emojiSrc,
+    emojiDisplayName: identity.emojiDisplayName,
+    emojiAnimated: identity.emojiAnimated,
     emojiKey: identity.emojiKey,
     reactionType: identity.reactionType,
 })
@@ -158,6 +167,9 @@ function migrateLegacyEntries(
                 userId,
                 emojiId: emojiKey.startsWith('custom:') ? emojiKey.slice(7) : null,
                 emojiName: emojiKey.startsWith('unicode:') ? emojiKey.slice(8) : null,
+                emojiSrc: null,
+                emojiDisplayName: emojiKey.startsWith('unicode:') ? emojiKey.slice(8) : null,
+                emojiAnimated: null,
                 emojiKey,
                 reactionType: type,
                 timestamp: migratedAt,
@@ -190,6 +202,11 @@ export function normalizeReactionStorage(
             if (item.timestamp != null && (!Number.isFinite(item.timestamp) || item.timestamp < 0)) continue
             history.set(item.id, {
                 ...item,
+                emojiId: nonEmpty(item.emojiId),
+                emojiName: nonEmpty(item.emojiName),
+                emojiSrc: nonEmpty(item.emojiSrc),
+                emojiDisplayName: nonEmpty(item.emojiDisplayName) ?? nonEmpty(item.emojiName),
+                emojiAnimated: typeof item.emojiAnimated === 'boolean' ? item.emojiAnimated : null,
                 reactionType: asNumber(item.reactionType),
                 epoch: Math.max(0, asNumber(item.epoch)),
                 timestamp: item.timestamp == null ? null : asNumber(item.timestamp),
@@ -223,6 +240,9 @@ export function normalizeReactionStorage(
                 userId: value.userId,
                 emojiId: nonEmpty(value.emojiId),
                 emojiName: nonEmpty(value.emojiName),
+                emojiSrc: nonEmpty(value.emojiSrc),
+                emojiDisplayName: nonEmpty(value.emojiDisplayName) ?? nonEmpty(value.emojiName),
+                emojiAnimated: typeof value.emojiAnimated === 'boolean' ? value.emojiAnimated : null,
                 emojiKey: value.emojiKey,
                 reactionType: asNumber(value.reactionType),
             }
@@ -266,7 +286,7 @@ export function applyReactionAdd(
     now = Date.now(),
 ): ReactionStorage {
     const state = normalizeReactionStorage(input, now)
-    const identity = identityFromPayload(payload)
+    const identity = reactionIdentityFromPayload(payload)
     if (!identity) return state
 
     const active = new Map(state.activeReactions.map(item => [activeReactionKey(item), item]))
@@ -305,6 +325,9 @@ export function applyReactionRemove(
             userId: identity.userId,
             emojiId: identity.emojiId,
             emojiName: identity.emojiName,
+            emojiSrc: identity.emojiSrc,
+            emojiDisplayName: identity.emojiDisplayName,
+            emojiAnimated: identity.emojiAnimated,
             emojiKey: identity.emojiKey,
             reactionType: identity.reactionType,
             timestamp: now,
