@@ -112,7 +112,7 @@ internal class ReactionLogHooks(
     init {
         hookReactionPills(dexFinder)
         runCatching { hookReactionPopup(dexFinder) }.onFailure {
-            XposedBridge.log("Reaction Logs: popup integration unavailable: \$it")
+            XposedBridge.log("Reaction Logs: popup integration unavailable: $it")
         }
     }
 
@@ -288,7 +288,7 @@ internal class ReactionLogHooks(
         synchronized(removedUsersByPillKey) { removedUsersByPillKey[key]?.isNotEmpty() == true }
 
     private fun reactionPillKey(messageId: String, emojiKey: String, type: Int) =
-        "\$messageId|\$emojiKey|\$type"
+        "$messageId|$emojiKey|$type"
 
     private fun rowIdentityKey(
         channelId: String,
@@ -384,7 +384,7 @@ internal class ReactionLogHooks(
                 for (index in 0 until flexbox.childCount) {
                     val view = flexbox.getChildAt(index) as? LinearLayout ?: continue
                     val key = boundPills[view] ?: continue
-                    if (key.startsWith("\$messageId|") && isRemovedPill(key)) {
+                    if (key.startsWith("$messageId|") && isRemovedPill(key)) {
                         synchronized(retainedPillViews) { retainedPillViews[key] = view }
                     }
                 }
@@ -412,7 +412,7 @@ internal class ReactionLogHooks(
                 }
 
                 if (messageId != null) {
-                    val prefix = "\$messageId|"
+                    val prefix = "$messageId|"
                     val retained = synchronized(retainedPillViews) {
                         retainedPillViews.entries
                             .filter { it.key.startsWith(prefix) && isRemovedPill(it.key) }
@@ -423,7 +423,7 @@ internal class ReactionLogHooks(
                         if (view.parent !== flexbox) {
                             (view.parent as? ViewGroup)?.removeView(view)
                             runCatching { flexbox.addView(view) }.onFailure {
-                                XposedBridge.log("Reaction Logs: could not retain zero-count reaction pill: \$it")
+                                XposedBridge.log("Reaction Logs: could not retain zero-count reaction pill: $it")
                             }
                         }
                         boundPills[view] = key
@@ -644,7 +644,7 @@ internal class ReactionLogHooks(
         if (view == null) return
 
         runCatching { method.invoke(widget, model) }.onFailure {
-            XposedBridge.log("Reaction Logs: could not refresh the open reaction popup: \$it")
+            XposedBridge.log("Reaction Logs: could not refresh the open reaction popup: $it")
         }
     }
 
@@ -730,7 +730,7 @@ internal class ReactionLogHooks(
             } ?: return@runCatching
             method.invoke(users, pending.toList())
         }.onFailure {
-            XposedBridge.log("Reaction Logs: could not request missing removed users: \$it")
+            XposedBridge.log("Reaction Logs: could not request missing removed users: $it")
         }
     }
 
@@ -748,7 +748,7 @@ internal class ReactionLogHooks(
         constructor.isAccessible = true
         constructor.newInstance(user, channelId, messageId, emoji, false, guildMember)
     }.onFailure {
-        XposedBridge.log("Reaction Logs: could not construct native removed-user row: \$it")
+        XposedBridge.log("Reaction Logs: could not construct native removed-user row: $it")
     }.getOrNull()
 
     private fun readMember(target: Any?, name: String): Any? {
@@ -917,15 +917,15 @@ internal class ReactionLogHooks(
                 ?.invoke(emoji)?.toString()?.takeIf { it.isNotBlank() && it != "null" }
         }.getOrNull()
 
-        if (id != null) return "custom:\$id"
-        if (name != null) return "unicode:\${Normalizer.normalize(name, Normalizer.Form.NFC)}"
+        if (id != null) return "custom:$id"
+        if (name != null) return "unicode:${Normalizer.normalize(name, Normalizer.Form.NFC)}"
 
         val text = emoji.toString()
         val parsedId = ID_PATTERN.find(text)?.groupValues?.get(1)?.takeIf { it.isNotBlank() && it != "null" }
         val parsedName = NAME_PATTERN.find(text)?.groupValues?.get(1)?.takeIf { it.isNotBlank() && it != "null" }
         return when {
-            parsedId != null -> "custom:\$parsedId"
-            parsedName != null -> "unicode:\${Normalizer.normalize(parsedName, Normalizer.Form.NFC)}"
+            parsedId != null -> "custom:$parsedId"
+            parsedName != null -> "unicode:${Normalizer.normalize(parsedName, Normalizer.Form.NFC)}"
             else -> null
         }
     }
