@@ -276,7 +276,7 @@ export function applyReactionRemove(
 ): ReactionRuntimeState {
     const storage = normalizeStorage(input.storage, now)
     const identity = reactionIdentity(payload)
-    if (!identity) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions) }
+    if (!identity) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions), sessionStartedAt: input.sessionStartedAt }
 
     const active = new Map(input.activeReactions.map(item => [item.identityKey, item]))
     const wasActive = active.delete(identity.identityKey)
@@ -289,7 +289,7 @@ export function applyReactionRemove(
     // advance its epoch so a genuine new removal is not lost.
     if (previous && !wasActive) {
         if (now - previous.timestamp <= DUPLICATE_REMOVE_WINDOW_MS) {
-            return { storage, activeReactions: normalizeActiveReactions([...active.values()]) }
+            return { storage, activeReactions: normalizeActiveReactions([...active.values()]), sessionStartedAt: input.sessionStartedAt }
         }
         storage.epochs[identity.identityKey] = epoch + 1
         id = JSON.stringify([identity.identityKey, epoch + 1])
@@ -319,7 +319,7 @@ export function applyRemoveAll(
     const storage = normalizeStorage(input.storage, now)
     const channelId = eventString(payload, 'channelId', 'channel_id')
     const messageId = eventString(payload, 'messageId', 'message_id')
-    if (!channelId || !messageId) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions) }
+    if (!channelId || !messageId) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions), sessionStartedAt: input.sessionStartedAt }
 
     // Discord does not identify individual affected users in the bulk event.
     return {
@@ -340,7 +340,7 @@ export function applyRemoveEmoji(
     const channelId = eventString(payload, 'channelId', 'channel_id')
     const messageId = eventString(payload, 'messageId', 'message_id')
     const emoji = emojiIdentity(payload.emoji)
-    if (!channelId || !messageId || !emoji) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions) }
+    if (!channelId || !messageId || !emoji) return { storage, activeReactions: normalizeActiveReactions(input.activeReactions), sessionStartedAt: input.sessionStartedAt }
 
     // This bulk event also carries no per-user identity; preserve history unchanged.
     return {
