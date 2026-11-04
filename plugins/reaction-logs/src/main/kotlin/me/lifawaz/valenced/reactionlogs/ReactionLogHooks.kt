@@ -39,6 +39,13 @@ private const val REACTION_USER_ITEM =
 private const val MG_RECYCLER_VIEW_HOLDER =
     "com.discord.utilities.mg_recycler.MGRecyclerViewHolder"
 
+private data class ReactionModelKey(
+    val channelId: String,
+    val messageId: String,
+    val emojiKey: String,
+    val reactionType: Int,
+)
+
 private val REMOVED_RED = Color.rgb(237, 66, 69)
 private val REMOVED_TINT = Color.argb(48, 237, 66, 69)
 private const val STALE_ACTIVE_ROW_GRACE_MS = 5_000L
@@ -60,12 +67,6 @@ internal class ReactionLogHooks(
         val countVisibility: Int?,
         val countSwitcherVisibility: Int?,
         val labelVisibilities: Map<Int, Int>,
-    )
-    private data class ReactionModelKey(
-        val channelId: String,
-        val messageId: String,
-        val emojiKey: String,
-        val reactionType: Int,
     )
     private data class UserRowBinding(
         val guildId: String?,
