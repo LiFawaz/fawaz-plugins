@@ -660,6 +660,24 @@ internal class ReactionLogHooks(
             if (augmented !== model) param.args[0] = augmented
         })
 
+        // Stop retries and release popup references as soon as Discord destroys
+        // the original Fragment view. This is UI cleanup only; saved history stays.
+        val destroyPopupView = generateSequence(widgetClass) { it.superclass }
+            .flatMap { it.declaredMethods.asSequence() }
+            .firstOrNull { it.name == "onDestroyView" && it.parameterCount == 0 }
+        if (destroyPopupView != null) {
+            destroyPopupView.isAccessible = true
+            unhooks += destroyPopupView.hook(before = { param ->
+                if (lastPopupWidget?.get() === param.thisObject) {
+                    lastPopupWidget = null
+                    lastPopupModel = null
+                    clearPopupState()
+                }
+            })
+        } else {
+            XposedBridge.log("Reaction Logs: WidgetManageReactions.onDestroyView not found; popup retry cleanup is limited")
+        }
+
         val holderBase = dexFinder.classLoader.loadClass(MG_RECYCLER_VIEW_HOLDER)
         val configure = generateSequence(holderBase) { it.superclass }
             .flatMap { it.declaredMethods.asSequence() }
@@ -695,7 +713,7 @@ internal class ReactionLogHooks(
      * existing Discord model. Constructing Discord's own ReactionUserItem keeps
      * its real User, avatar, display name and profile-click behavior.
      */
-    private fun clearPopupSelection(model: Any): Any {
+    private fun clearPopupState() {
         detailsGuildId = null
         detailsChannelId = null
         detailsMessageId = null
@@ -705,6 +723,10 @@ internal class ReactionLogHooks(
         cancelPopupRetry()
         popupRetryKey = null
         refreshUserRows()
+    }
+
+    private fun clearPopupSelection(model: Any): Any {
+        clearPopupState()
         return model
     }
 
@@ -815,6 +837,9 @@ internal class ReactionLogHooks(
         if (unresolvedUsers) schedulePopupRetry(selectionRetryKey) else cancelPopupRetry()
 
         if (output == originalItems) return model
+        if (removedIds.isNotEmpty()) {
+            XposedBridge.log("Reaction Logs: appended ${removedIds.size} removed user row(s) to Discord's original popup")
+        }
         val copy = model.javaClass.methods.firstOrNull {
             it.name == "copy" && it.parameterCount == 2
         }
@@ -912,8 +937,16 @@ internal class ReactionLogHooks(
         guildMember: Any?,
     ): Any? = runCatching {
         val itemClass = loader.loadClass(REACTION_USER_ITEM)
-        val constructor = itemClass.declaredConstructors.firstOrNull { it.parameterCount == 6 }
-            ?: return@runCatching null
+        val constructor = itemClass.declaredConstructors.firstOrNull { candidate ->
+            val types = candidate.parameterTypes
+            types.size == 6 &&
+                types[0].isAssignableFrom(user.javaClass) &&
+                types[1] == Long::class.javaPrimitiveType &&
+                types[2] == Long::class.javaPrimitiveType &&
+                types[3].isAssignableFrom(emoji.javaClass) &&
+                types[4] == Boolean::class.javaPrimitiveType &&
+                (guildMember == null || types[5].isAssignableFrom(guildMember.javaClass))
+        } ?: return@runCatching null
         constructor.isAccessible = true
         constructor.newInstance(user, channelId, messageId, emoji, false, guildMember)
     }.onFailure {
@@ -949,16 +982,21 @@ internal class ReactionLogHooks(
     }
 
     private fun schedulePopupRetry(key: String) {
+        if (lastPopupWidget?.get() == null || lastPopupModel == null) return
         if (popupRetryKey != key) {
             cancelPopupRetry()
             popupRetryKey = key
         }
-        // Keep trying while the popup remains available; USER_UPDATE and
-        // GUILD_MEMBER_UPDATE events also trigger an immediate retry through JS.
+        // A retry is valid only for the same open popup and the same selected
+        // message/emoji/type. onDestroyView clears the widget reference.
         if (popupRetryAttempts >= 8 || popupRetryRunnable != null) return
         val delay = (250L shl popupRetryAttempts).coerceAtMost(8_000L)
         val retry = Runnable {
             popupRetryRunnable = null
+            if (popupRetryKey != key || lastPopupWidget?.get() == null || lastPopupModel == null) {
+                cancelPopupRetry()
+                return@Runnable
+            }
             popupRetryAttempts++
             refreshPopupModel()
         }
@@ -974,19 +1012,31 @@ internal class ReactionLogHooks(
 
     private fun reactionType(reaction: Any, selectedItem: Any): Int {
         val direct = readMember(reaction, "reactionType")
+            ?: readMember(reaction, "selectedReactionType")
             ?: readMember(reaction, "type")
             ?: readMember(selectedItem, "reactionType")
+            ?: readMember(selectedItem, "selectedReactionType")
             ?: readMember(selectedItem, "type")
         if (direct is Number) return direct.toInt()
         if (direct is String) {
             direct.toIntOrNull()?.let { return it }
             if (direct.equals("burst", ignoreCase = true)) return 1
+            if (direct.equals("normal", ignoreCase = true)) return 0
         }
-        val burst = readMember(reaction, "isBurst")
+
+        val burstFlag = readMember(reaction, "isBurstReaction")
+            ?: readMember(reaction, "isBurst")
             ?: readMember(reaction, "burst")
+            ?: readMember(selectedItem, "isBurstReaction")
             ?: readMember(selectedItem, "isBurst")
             ?: readMember(selectedItem, "burst")
-        return if (burst == true) 1 else 0
+        if (burstFlag is Boolean) return if (burstFlag) 1 else 0
+
+        // The current MessageReaction model can carry both normal and burst
+        // counts. Use an exclusive count when only one flavour exists.
+        val normalCount = (readMember(reaction, "count") as? Number)?.toInt() ?: 0
+        val burstCount = (readMember(reaction, "burstCount") as? Number)?.toInt() ?: 0
+        return if (burstCount > 0 && normalCount == 0) 1 else 0
     }
 
     private fun applyUserRowStyle(view: View, highlighted: Boolean) {
