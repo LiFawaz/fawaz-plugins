@@ -44,14 +44,19 @@ function getString(
 }
 
 function reactionType(payload: ReactionPayload): number {
+    // The Gateway's explicit burst flag wins over generic type aliases. Flux's
+    // top-level payload.type is the action name (MESSAGE_REACTION_*), not 0/1.
+    if (typeof payload.burst === 'boolean') return payload.burst ? 1 : 0
+
     const value = payload.reactionType ?? payload.reaction_type
     if (typeof value === 'number' && Number.isFinite(value)) return value
     if (typeof value === 'string') {
         const parsed = Number(value)
         if (Number.isInteger(parsed) && Number.isFinite(parsed)) return parsed
         if (value.toLowerCase() === 'burst') return 1
+        if (value.toLowerCase() === 'normal') return 0
     }
-    return payload.burst === true ? 1 : 0
+    return 0
 }
 
 export function reactionIdentityFromPayload(payload: ReactionPayload): ReactionIdentity | null {
