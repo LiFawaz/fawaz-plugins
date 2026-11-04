@@ -250,6 +250,10 @@ internal class ReactionLogHooks(
     }
 
     fun dispose() {
+        val popupWidget = lastPopupWidget?.get()
+        val popupModel = lastPopupModel
+        val popupMethod = configureUiMethod
+
         unhooks.forEach { runCatching { it.unhook() } }
         unhooks.clear()
 
@@ -268,6 +272,13 @@ internal class ReactionLogHooks(
             retainedPillViews.values.toList().also { retainedPillViews.clear() }
         }
         mainHandler.post {
+            // Restore Discord's unmodified model so synthetic historical rows do not remain
+            // visible after the native plugin hooks are unloaded.
+            if (popupWidget != null && popupModel != null && popupMethod != null) {
+                runCatching { popupMethod.invoke(popupWidget, popupModel) }.onFailure {
+                    XposedBridge.log("Reaction Logs: could not restore popup model during unload: $it")
+                }
+            }
             retained.forEach { view ->
                 (view.parent as? ViewGroup)?.removeView(view)
                 boundPills.remove(view)
@@ -525,6 +536,7 @@ internal class ReactionLogHooks(
 
     private fun augmentPopupModel(widget: Any, model: Any, loader: ClassLoader): Any {
         synchronized(popupRemovedRowKeys) { popupRemovedRowKeys.clear() }
+        refreshUserRows()
         val provider = readMember(widget, "modelProvider") ?: return model
         val channelId = readMember(provider, "channelId")?.toString() ?: return model
         val messageId = readMember(provider, "messageId")?.toString() ?: return model
@@ -592,6 +604,7 @@ internal class ReactionLogHooks(
                 usersToFetch.add(userIdLong)
                 continue
             }
+            synchronized(requestedUserFetches) { requestedUserFetches.remove(userIdLong) }
             val member = guildId?.let { resolveGuildMember(loader, it, userIdLong) }
             val row = createReactionUserItem(
                 loader,
