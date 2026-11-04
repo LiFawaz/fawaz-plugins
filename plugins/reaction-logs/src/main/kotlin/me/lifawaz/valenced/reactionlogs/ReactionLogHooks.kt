@@ -40,6 +40,8 @@ private const val MANAGE_REACTIONS_EMOJI_ITEM =
     "com.discord.widgets.chat.managereactions.ManageReactionsEmojisAdapter\$ReactionEmojiItem"
 private const val MESSAGE_REACTION_MODEL =
     "com.discord.chat.bridge.reaction.MessageReaction"
+private const val API_REACTION_EMOJI =
+    "com.discord.api.message.reaction.MessageReactionEmoji"
 private const val EXTRA_EMOJI_KEY = "com.discord.intent.extra.EXTRA_EMOJI_KEY"
 private const val REACTION_USER_ITEM =
     "com.discord.widgets.chat.managereactions.ManageReactionsResultsAdapter\$ReactionUserItem"
@@ -1523,6 +1525,35 @@ internal class ReactionLogHooks(
         guildMembers[numericUserId] ?: guildMembers[userId]
     }.getOrNull()
 
+    /**
+     * The reaction pill model uses chat.bridge.MessageReactionEmoji, while the
+     * native popup's ReactionUserItem constructor requires api.message.reaction.
+     * They have the same visible fields but are distinct runtime classes.
+     */
+    private fun createApiReactionEmoji(loader: ClassLoader, sourceEmoji: Any): Any? = runCatching {
+        val emojiClass = loader.loadClass(API_REACTION_EMOJI)
+        val id = readMember(sourceEmoji, "id")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        val name = readMember(sourceEmoji, "name")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        val animated = readMember(sourceEmoji, "animated") as? Boolean ?: false
+        val constructor = emojiClass.declaredConstructors.firstOrNull { candidate ->
+            val types = candidate.parameterTypes
+            types.size == 3 &&
+                types[0] == String::class.java &&
+                types[1] == String::class.java &&
+                (types[2] == Boolean::class.javaPrimitiveType || types[2] == java.lang.Boolean::class.java)
+        } ?: run {
+            XposedBridge.log(
+                "Reaction Logs: no compatible API MessageReactionEmoji constructor; candidates=" +
+                    emojiClass.declaredConstructors.joinToString { it.toGenericString() },
+            )
+            return@runCatching null
+        }
+        constructor.isAccessible = true
+        constructor.newInstance(id, name, animated)
+    }.onFailure {
+        XposedBridge.log("Reaction Logs: could not convert popup emoji to API model: $it")
+    }.getOrNull()
+
     private fun createReactionUserItem(
         loader: ClassLoader,
         user: Any,
@@ -1531,6 +1562,7 @@ internal class ReactionLogHooks(
         emoji: Any,
         guildMember: Any?,
     ): Any? = runCatching {
+        val apiEmoji = createApiReactionEmoji(loader, emoji) ?: return@runCatching null
         val itemClass = loader.loadClass(REACTION_USER_ITEM)
         val constructor = itemClass.declaredConstructors.firstOrNull { candidate ->
             val types = candidate.parameterTypes
@@ -1539,8 +1571,8 @@ internal class ReactionLogHooks(
                 types[0].isAssignableFrom(user.javaClass) &&
                 types[1] == Long::class.javaPrimitiveType &&
                 types[2] == Long::class.javaPrimitiveType &&
-                types[3].name == "com.discord.api.message.reaction.MessageReactionEmoji" &&
-                types[3].isAssignableFrom(emoji.javaClass) &&
+                types[3].name == API_REACTION_EMOJI &&
+                types[3].isAssignableFrom(apiEmoji.javaClass) &&
                 types[4] == Boolean::class.javaPrimitiveType &&
                 types[5].name == "com.discord.models.member.GuildMember" &&
                 (guildMember == null || types[5].isAssignableFrom(guildMember.javaClass))
@@ -1552,7 +1584,9 @@ internal class ReactionLogHooks(
             return@runCatching null
         }
         constructor.isAccessible = true
-        constructor.newInstance(user, channelId, messageId, emoji, false, guildMember)
+        // canDelete=false keeps the original result row read-only. Clicking the
+        // row still reaches Discord's own user-sheet navigation via its adapter.
+        constructor.newInstance(user, channelId, messageId, apiEmoji, false, guildMember)
     }.onFailure {
         XposedBridge.log("Reaction Logs: could not create removed-user popup row: $it")
     }.getOrNull()
