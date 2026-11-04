@@ -44,9 +44,9 @@ function getString(
 }
 
 function reactionType(payload: ReactionPayload): number {
-    // The Gateway's explicit burst flag wins over generic type aliases. Flux's
-    // top-level payload.type is the action name (MESSAGE_REACTION_*), not 0/1.
-    if (typeof payload.burst === 'boolean') return payload.burst ? 1 : 0
+    // A positive burst flag is authoritative. A false burst flag must not
+    // override an explicit reactionType value supplied by the Flux model.
+    if (payload.burst === true) return 1
 
     const value = payload.reactionType ?? payload.reaction_type
     if (typeof value === 'number' && Number.isFinite(value)) return value
