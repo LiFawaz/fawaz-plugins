@@ -921,19 +921,37 @@ internal class ReactionLogHooks(
             XposedBridge.log("Reaction Logs: appended ${removedIds.size} removed user row(s) to Discord's original popup")
         }
         val copy = model.javaClass.methods.firstOrNull {
-            it.name == "copy" && it.parameterCount == 2
+            it.name == "copy" &&
+                it.parameterCount == 2 &&
+                it.parameterTypes[0].isAssignableFrom(reactionItems.javaClass) &&
+                it.parameterTypes[1].isAssignableFrom(output.javaClass)
         }
-        if (copy != null) {
-            return runCatching { copy.invoke(model, reactionItems, output) }.getOrNull() ?: model
+        val copied = copy?.let {
+            runCatching { it.invoke(model, reactionItems, output) }.getOrNull()
         }
+        if (copied != null) return copied
+
+        // If the Kotlin data-class copy method is unavailable or incompatible,
+        // try the actual two-list constructor instead of silently returning the
+        // unmodified model.
         val constructor = model.javaClass.declaredConstructors.firstOrNull {
             it.parameterCount == 2 &&
-                List::class.java.isAssignableFrom(it.parameterTypes[0]) &&
-                List::class.java.isAssignableFrom(it.parameterTypes[1])
-        } ?: return model
+                it.parameterTypes[0].isAssignableFrom(reactionItems.javaClass) &&
+                it.parameterTypes[1].isAssignableFrom(output.javaClass)
+        }
+        if (constructor == null) {
+            XposedBridge.log(
+                "Reaction Logs: cannot copy ManageReactions model; copyMethods=" +
+                    model.javaClass.methods.filter { it.name == "copy" }.joinToString { it.toGenericString() } +
+                    ", constructors=" + model.javaClass.declaredConstructors.joinToString { it.toGenericString() },
+            )
+            return model
+        }
         return runCatching {
             constructor.isAccessible = true
             constructor.newInstance(reactionItems, output)
+        }.onFailure {
+            XposedBridge.log("Reaction Logs: ManageReactions model copy/constructor failed: $it")
         }.getOrNull() ?: model
     }
 
@@ -1050,7 +1068,13 @@ internal class ReactionLogHooks(
                 types[4] == Boolean::class.javaPrimitiveType &&
                 types[5].name == "com.discord.models.member.GuildMember" &&
                 (guildMember == null || types[5].isAssignableFrom(guildMember.javaClass))
-        } ?: return@runCatching null
+        } ?: run {
+            XposedBridge.log(
+                "Reaction Logs: no compatible ReactionUserItem constructor; candidates=" +
+                    itemClass.declaredConstructors.joinToString { it.toGenericString() },
+            )
+            return@runCatching null
+        }
         constructor.isAccessible = true
         constructor.newInstance(user, channelId, messageId, emoji, false, guildMember)
     }.onFailure {
