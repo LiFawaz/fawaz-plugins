@@ -2,14 +2,18 @@
 
 Adds **Download Voice Message** to the long-press action sheet for native Discord voice messages.
 
-## Configure
+## Choose where audio is saved
 
-Open the plugin's Configure section. Choose **Documents** to keep files in the app's persistent documents storage or **Cache** for temporary storage. Enter a folder name such as `voice-messages` or a nested path such as `Audio/Discord`.
+Open the plugin's **Configure** section and tap **Choose or change folder**. Android's system file picker opens. Select an existing folder, or create a new folder in the picker when the selected file provider offers that option.
+
+The selected folder is remembered. The first download also opens the picker automatically when no folder has been selected yet.
 
 ## Saving behaviour
 
-The plugin downloads the attachment from Discord's CDN with `fetch()`, converts the returned bytes to base64, and writes the file using Valenced's `FileModule.writeFile()` API. It does not use `FileModule.readAsset()` on a remote URL, which failed on some Android builds with `Resource id #0x0`.
+The native Android component uses Android's Storage Access Framework with ACTION_OPEN_DOCUMENT_TREE. It takes a persistable write permission for the selected folder and stores the folder URI in the plugin's private data directory. The permission is intended to survive plugin restarts and Android process restarts.
 
-Valenced exposes only app Documents and Cache through its current file API. This plugin cannot write directly to the public Android Downloads folder or invoke Android's folder picker. Files are saved under the folder selected in Configure, inside the selected app storage location.
+When a voice message is downloaded, the native component streams the Discord CDN attachment directly into a new document in the selected folder. The audio is not stored in Valenced's private Documents or Cache folders, and the plugin does not copy a private app path to the clipboard.
 
-The source is plain JavaScript. A smoke test covers the plugin loader wrapper, Configure callbacks, voice-message menu injection, CDN fetch, byte conversion, and selected storage path. Live Android behavior still needs testing on the user's installed Valenced build.
+If Android revokes access to the folder or the folder is removed, open Configure and choose another folder. Downloads are limited to 50 MB and are accepted only from Discord's HTTPS attachment CDN hosts.
+
+Some Android system locations may be restricted by the system picker, and folder creation depends on the selected document provider.
