@@ -443,11 +443,20 @@ export function removedUsersForPopup(
 export function buildNativeSnapshot(state: ReactionRuntimeState, now = Date.now()) {
     const storage = normalizeStorage(state.storage, now)
     const activeReactions = normalizeActiveReactions(state.activeReactions)
-    const activeKeys = new Set(activeReactions.map(item => item.identityKey))
     const grouped = new Map<string, Set<string>>()
 
     for (const item of storage.removalHistory) {
-        if (activeKeys.has(item.identityKey)) continue
+        // Legacy 1.2.9 records did not include channel or guild IDs. Reconcile
+        // them against the full active tuple without letting unrelated users match.
+        const isActiveAgain = activeReactions.some(active =>
+            active.messageId === item.messageId &&
+            active.userId === item.userId &&
+            active.emojiKey === item.emojiKey &&
+            active.reactionType === item.reactionType &&
+            (!item.channelId || active.channelId === item.channelId) &&
+            (!item.guildId || !active.guildId || active.guildId === item.guildId),
+        )
+        if (isActiveAgain) continue
         const pillKey = reactionPillKey(item)
         const users = grouped.get(pillKey) ?? new Set<string>()
         users.add(item.userId)
