@@ -749,6 +749,33 @@ internal class ReactionLogHooks(
         return name?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
     }
 
+    private fun currentRemovedUsersForEmoji(messageId: String, emojiKey: String): Set<String> =
+        synchronized(removedUsersByKey) {
+            removedUsersByKey
+                .filterKeys { it.startsWith("$messageId|$emojiKey|") }
+                .values
+                .flatten()
+                .toSet()
+        }
+
+    private fun hasRemovalForTarget(widget: Any, targetApiKey: String, loader: ClassLoader): Boolean {
+        val provider = readMember(widget, "modelProvider") ?: return false
+        val channelId = snowflakeId(readMember(provider, "channelId")) ?: return false
+        val messageId = snowflakeId(readMember(provider, "messageId")) ?: return false
+        val guildId = channelId.toLongOrNull()?.let { resolveGuildId(loader, it) }
+        val candidates = synchronized(removalHistory) {
+            removalHistory.values.filter { entry ->
+                entry.messageId == messageId &&
+                    (entry.channelId.isBlank() || entry.channelId == channelId) &&
+                    (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId) &&
+                    entryApiKey(entry) == targetApiKey
+            }
+        }
+        return candidates.any { entry ->
+            entry.userId in currentRemovedUsersForEmoji(messageId, entry.emojiKey)
+        }
+    }
+
     private fun entryApiKey(entry: RemovalEntry): String? =
         entry.emojiId ?: entry.emojiName
             ?: entry.emojiKey.takeIf { it.startsWith("unicode:") }?.removePrefix("unicode:")
@@ -842,6 +869,8 @@ internal class ReactionLogHooks(
                     (entry.channelId.isBlank() || entry.channelId == channelId) &&
                     (entry.guildId.isNullOrBlank() || guildId.isNullOrBlank() || entry.guildId == guildId)
             }
+        }.filter { entry ->
+            entry.userId in currentRemovedUsersForEmoji(messageId, entry.emojiKey)
         }
         if (history.isEmpty()) return null
 
@@ -1014,6 +1043,7 @@ internal class ReactionLogHooks(
         detailsMessageId = null
         detailsEmojiKey = null
         detailsReactionType = 0
+        popupTargetApiKey = null
         synchronized(popupRemovedUsers) { popupRemovedUsers.clear() }
         cancelPopupRetry()
         popupRetryKey = null
