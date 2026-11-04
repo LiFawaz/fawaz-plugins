@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: read
 
 jobs:
@@ -82,6 +82,50 @@ jobs:
               assert "classes.dex" in native.namelist(), native.namelist()
           print(f"PASS: {archive} contains manifest.json, index.js and a DEXed plugin.jar.")
           PY
+
+      - name: Publish package to this feature branch and update index
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/fix/reaction-logs-persistent-popup'
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import shutil
+          from pathlib import Path
+
+          plugin_id = "lifawaz.reaction-logs"
+          manifest_path = Path("plugins/reaction-logs/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          version = manifest["version"]
+          archive = Path(f"build/dist/{plugin_id}@{version}.zip")
+          destination = Path("pool") / archive.name
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(archive, destination)
+          data = destination.read_bytes()
+
+          index_path = Path("index.json")
+          index = json.loads(index_path.read_text(encoding="utf-8"))
+          plugin = index["plugins"][plugin_id]
+          plugin["description"] = manifest["description"]
+          plugin.setdefault("channels", {})["latest"] = version
+          plugin.setdefault("versions", {})[version] = {
+              "url": f"https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/{plugin_id}%40{version}.zip",
+              "sha256": hashlib.sha256(data).hexdigest(),
+              "size": len(data),
+              "dependencies": manifest.get("dependencies", {}),
+          }
+          index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+          print(f"Prepared {destination} ({len(data)} bytes)")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pool/lifawaz.reaction-logs@1.4.0.zip index.json
+          git diff --cached --quiet || git commit -m "Publish Reaction Logs 1.4.0 to feature branch"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Validate branch index and published package
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/fix/reaction-logs-persistent-popup'
+        run: python scripts/validate_repo.py
 
       - uses: actions/upload-artifact@v4
         with:
