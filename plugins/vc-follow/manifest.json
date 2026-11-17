@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "id": "com.lifawaz.vc-follow",
+  "name": "VC Follow",
+  "description": "Follow a user between voice channels, with lighter background checks for mobile devices.",
+  "author": "Li Fawaz (https://github.com/LiFawaz)",
+  "version": "1.3.9",
+  "dependencies": {
+    "valenced.api": {
+      "version": ">=1 <2"
+    },
+    "discord": {
+      "version": "*"
+    }
+  },
+  "dist": {
+    "script": "index.js"
+  }
+}

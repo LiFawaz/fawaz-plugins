@@ -22,6 +22,8 @@ jobs:
           node-version: "22"
       - name: Validate index, checksums, manifests and ZIP files
         run: python scripts/validate_repo.py
+      - name: Check VC Follow JavaScript syntax
+        run: node --check plugins/vc-follow/js/index.js
       - name: Check voice downloader JavaScript syntax
         run: node --check plugins/voice-message-downloader/js/index.js
       - name: Test voice downloader settings and save flow

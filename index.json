@@ -5,16 +5,29 @@
   "plugins": {
     "com.lifawaz.vc-follow": {
       "name": "VC Follow",
-      "description": "Follow a user between Discord voice channels with Configure settings and /vcf and /unvcf commands.",
+      "description": "Follow a user between voice channels, with lighter background checks for mobile devices.",
       "author": "Li Fawaz (https://github.com/LiFawaz)",
       "channels": {
-        "latest": "1.0.23"
+        "latest": "1.3.9"
       },
       "versions": {
         "1.0.23": {
           "url": "https://raw.githubusercontent.com/LiFawaz/valenced-vc-follow/main/pool/com.lifawaz.vc-follow%401.0.23.zip",
           "sha256": "08061c69c2e582bbc46e242bc0369a65ec4cd16447108e7a8bef2a444e508a3b",
           "size": 5521,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.3.9": {
+          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/pool/com.lifawaz.vc-follow%401.3.9.zip",
+          "sha256": "7425037435c863eebfabc4842917e99e8787e4af46173f87aaa8c89e56069796",
+          "size": 6295,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
@@ -67,42 +80,6 @@
             },
             "discord": {
               "version": "*"
-            }
-          }
-        }
-      }
-    },
-    "lifawaz.reaction-logs": {
-      "name": "Reaction Logs",
-      "description": "Retain removed reaction users in the matching reaction popup.",
-      "author": "Li Fawaz",
-      "channels": {
-        "latest": "1.4.0"
-      },
-      "versions": {
-        "1.2.9": {
-          "url": "https://raw.githubusercontent.com/LiFawaz/reaction-logs/gh-pages/pool/lifawaz.reaction-logs%401.2.9.zip",
-          "sha256": "3185ddc04acfaace550ceb38811380dd269e9c1d7f1c7b4dc8234257947a7203",
-          "size": 28504,
-          "dependencies": {
-            "valenced.api": {
-              "version": ">=1 <2"
-            },
-            "discord": {
-              "version": ">=352.2"
-            }
-          }
-        },
-        "1.4.0": {
-          "url": "https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/fix/reaction-logs-persistent-popup/pool/lifawaz.reaction-logs%401.4.0.zip",
-          "sha256": "e3da47b4d722e0f822265c8696a1c30cee6ace8941ba25f160e83123f9a6d107",
-          "size": 44216,
-          "dependencies": {
-            "valenced.api": {
-              "version": ">=1 <2"
-            },
-            "discord": {
-              "version": ">=352.2"
             }
           }
         }

@@ -7,3 +7,8 @@ Added a Configure screen to select persistent app Documents or temporary app Cac
 ## Repository maintenance
 
 Corrected the Role Color Everywhere 1.1.7 package checksum using its successful GitHub Actions build ZIP. Added CI checks for package sizes, SHA-256 hashes, ZIP integrity, and manifest ID/version consistency. Hidden Channels remains excluded.
+
+## VC Follow 1.3.9
+
+Reduced the repeated background work that could make the app feel slow on phones. Voice-state lookups are cached, duplicate status updates are skipped, and the extra module scan stops once the disconnect hook is found. Follow behavior and settings are kept the same.
+

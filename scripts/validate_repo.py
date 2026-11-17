@@ -29,8 +29,8 @@ def main() -> None:
         fail("index.json format must be 1")
 
     plugins = index.get("plugins")
-    if not isinstance(plugins, dict) or len(plugins) != 5:
-        fail("expected exactly five plugins in the repository index")
+    if not isinstance(plugins, dict) or len(plugins) != 4:
+        fail("expected exactly four plugins in the repository index")
 
     names = [str(item.get("name", "")).lower() for item in plugins.values()]
     ids = [str(plugin_id).lower() for plugin_id in plugins]
@@ -41,7 +41,6 @@ def main() -> None:
         "com.lifawaz.vc-follow",
         "com.lifawaz.fake-deaf",
         "com.lifawaz.role-color-everywhere",
-        "lifawaz.reaction-logs",
         "com.lifawaz.voice-message-downloader",
     }
     if set(plugins) != expected_ids:

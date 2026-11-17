@@ -1,35 +1,32 @@
 # Fawaz Plugins
 
-A unified Valenced plugin repository maintained by LiFawaz.
+A few Valenced plugins I've put together.
 
 ## Install
 
-Add this repository URL once in Valenced:
+Add this repo in Valenced:
 
-```text
-https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/index.json
-```
+`https://raw.githubusercontent.com/LiFawaz/fawaz-plugins/main/index.json`
 
-Then open the plugin browser and install the plugins you want.
+After that, open the plugin browser and install what you need.
 
-## Included plugins
+## Plugins
 
 | Plugin | Version | What it does |
 | --- | --- | --- |
-| VC Follow | 1.0.23 | Follows a user between Discord voice channels |
-| Fake-deaf | 0.2.0 | Toggles fake mute/deafen voice-state flags |
-| Role Color Everywhere | 1.1.7 | Applies role colors to mentions, typing names and voice users |
-| Reaction Logs | 1.2.9 | Marks removed reaction pills red locally |
-| Voice Message Downloader | 1.0.8 | Saves voice messages through Android Files |
+| VC Follow | 1.3.9 | Follows a user when they move between voice channels |
+| Fake-deaf | 0.2.0 | Toggles fake mute and deafen flags |
+| Role Color Everywhere | 1.1.7 | Uses role colors for mentions, typing names and voice users |
+| Voice Message Downloader | 1.0.8 | Saves voice messages using Android Files |
 
-**Hidden Channels is intentionally excluded.**
+Hidden Channels isn't included.
 
 ## Voice Message Downloader
 
-Every download opens Android Files. Choose **Create new file** to select a folder and filename, or **Choose existing file** to replace an audio file after a confirmation prompt. Configure also lets you save an optional default folder so the picker starts there next time.
+The download opens Android Files so you can choose where the audio goes. You can also save a default folder in Configure, so the picker starts there next time.
 
-The plugin uses Android's Storage Access Framework and a native Kotlin component. It does not save voice messages into Valenced's private Documents or Cache folders.
+It uses Android's Storage Access Framework rather than saving files in Valenced's private folders.
 
-## Source repositories
+## Source
 
-[VC Follow](https://github.com/LiFawaz/valenced-vc-follow) · [Fake-deaf](https://github.com/LiFawaz/valenced-fake-deaf) · [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere) · [Reaction Logs](https://github.com/LiFawaz/reaction-logs)
+[VC Follow](https://github.com/LiFawaz/valenced-vc-follow) · [Fake-deaf](https://github.com/LiFawaz/valenced-fake-deaf) · [Role Color Everywhere](https://github.com/LiFawaz/Role-Colors-Everywhere)
