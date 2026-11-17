@@ -19,4 +19,4 @@ After that, open the plugin browser and install what you need.
 | Role Color Everywhere | 1.1.7 | Uses role colors for mentions, typing names and voice users |
 | Voice Message Downloader | 1.0.8 | Saves voice messages using Android Files |
 
-Hidden Channels isn't included.
+
